@@ -1,0 +1,28 @@
+{
+  "name": "task-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task management web app — Express + MySQL (server) and React + Vite + TailwindCSS (client)",
+  "scripts": {
+    "dev": "concurrently -k -n SERVER,CLIENT -c green,cyan \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix server run build && npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "db:init": "npm --prefix server run db:init",
+    "db:migrate:users": "npm --prefix server run db:migrate:users",
+    "db:migrate:task-assignees": "npm --prefix server run db:migrate:task-assignees",
+    "db:migrate:projects": "npm --prefix server run db:migrate:projects",
+    "db:migrate:registration-otp": "npm --prefix server run db:migrate:registration-otp",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
+    "knex": "^3.3.0",
+    "lucide-react": "^1.53.0",
+    "recharts": "^3.10.1"
+  }
+}
