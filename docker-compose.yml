@@ -54,7 +54,7 @@ services:
     container_name: taskmanager_frontend
     restart: always
     ports:
-      - "3000:80"               
+      - "9999:80"               
     depends_on:
       - backend
     networks:
