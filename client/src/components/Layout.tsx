@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import logoFull from "../assets/img/logo/logo.jpg";
 import logoSmall from "../assets/img/logo/logo-small.jpg";
+import toast from "react-hot-toast";
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -48,6 +49,7 @@ export default function Layout() {
 
   const handleLogout = () => {
     logout();
+    toast.success("Đã đăng xuất.");
     navigate("/login");
   };
 

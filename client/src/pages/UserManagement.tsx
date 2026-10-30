@@ -17,6 +17,8 @@ import {
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { ManagedUser } from '../types';
+import toast from 'react-hot-toast';
+import ConfirmModal from '../components/common/ConfirmModal';
 
 const JOB_TITLES = ['Project Lead', 'Developer', 'Tester', 'Designer'] as const;
 const DEPARTMENTS = [
@@ -100,6 +102,8 @@ export default function UserManagement() {
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [busyUserId, setBusyUserId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ManagedUser | null>(null);
+  const [pendingStatusChange, setPendingStatusChange] = useState<ManagedUser | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -108,7 +112,9 @@ export default function UserManagement() {
       const response = await api.get<{ data: ManagedUser[] }>('/users');
       setUsers(Array.isArray(response.data?.data) ? response.data.data : []);
     } catch (error) {
-      setPageError(errorMessage(error, 'Không thể tải danh sách nhân sự.'));
+      const message = errorMessage(error, 'Không thể tải danh sách nhân sự.');
+      setPageError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -173,19 +179,23 @@ export default function UserManagement() {
     const email = form.email.trim().toLowerCase();
     if (!name) {
       setFormError('Vui lòng nhập họ và tên.');
+      toast.error('Vui lòng nhập họ và tên.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setFormError('Vui lòng nhập địa chỉ email hợp lệ.');
+      toast.error('Vui lòng nhập địa chỉ email hợp lệ.');
       return;
     }
     if (!editingUser && (form.password.length < 8 || form.password.length > 128)) {
       setFormError('Mật khẩu tạm cần có từ 8 đến 128 ký tự.');
+      toast.error('Mật khẩu tạm cần có từ 8 đến 128 ký tự.');
       return;
     }
 
     setSaving(true);
     setFormError('');
+    const toastId = toast.loading(editingUser ? 'Đang cập nhật nhân sự...' : 'Đang tạo tài khoản nhân sự...');
     const payload = {
       name,
       email,
@@ -196,15 +206,19 @@ export default function UserManagement() {
     try {
       if (editingUser) {
         await api.put(`/users/${editingUser.id}`, payload);
+        toast.success('Đã cập nhật thông tin nhân sự.', { id: toastId });
       } else {
         await api.post('/users', payload);
+        toast.success('Đã tạo tài khoản nhân sự.', { id: toastId });
       }
       setIsModalOpen(false);
       setEditingUser(null);
       setForm(emptyForm);
       await loadUsers();
     } catch (error) {
-      setFormError(errorMessage(error, 'Không thể lưu thông tin nhân sự.'));
+      const message = errorMessage(error, 'Không thể lưu thông tin nhân sự.');
+      setFormError(message);
+      toast.error(message, { id: toastId });
     } finally {
       setSaving(false);
     }
@@ -213,26 +227,38 @@ export default function UserManagement() {
   const toggleActive = async (user: ManagedUser) => {
     setBusyUserId(user.id);
     setPageError('');
+    const toastId = toast.loading(user.isActive ? 'Đang khóa tài khoản...' : 'Đang kích hoạt tài khoản...');
     try {
       await api.patch(`/users/${user.id}/status`, { isActive: !user.isActive });
+      toast.success(user.isActive ? `Đã khóa tài khoản ${user.name}.` : `Đã kích hoạt tài khoản ${user.name}.`, { id: toastId });
+      setPendingStatusChange(null);
       await loadUsers();
+      return true;
     } catch (error) {
-      setPageError(errorMessage(error, 'Không thể cập nhật trạng thái tài khoản.'));
+      const message = errorMessage(error, 'Không thể cập nhật trạng thái tài khoản.');
+      setPageError(message);
+      toast.error(message, { id: toastId });
+      return false;
     } finally {
       setBusyUserId(null);
     }
   };
 
   const deleteUser = async (user: ManagedUser) => {
-    const confirmed = window.confirm(`Bạn có chắc muốn xóa nhân sự ${user.name}? Thao tác này không thể hoàn tác.`);
-    if (!confirmed) return;
     setBusyUserId(user.id);
     setPageError('');
+    const toastId = toast.loading('Đang xóa nhân sự...');
     try {
       await api.delete(`/users/${user.id}`);
+      toast.success(`Đã xóa nhân sự ${user.name}.`, { id: toastId });
+      setPendingDelete(null);
       await loadUsers();
+      return true;
     } catch (error) {
-      setPageError(errorMessage(error, 'Không thể xóa nhân sự.'));
+      const message = errorMessage(error, 'Không thể xóa nhân sự.');
+      setPageError(message);
+      toast.error(message, { id: toastId });
+      return false;
     } finally {
       setBusyUserId(null);
     }
@@ -374,7 +400,7 @@ export default function UserManagement() {
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         type="button"
-                        onClick={() => void toggleActive(user)}
+                        onClick={() => setPendingStatusChange(user)}
                         disabled={busyUserId === user.id || currentUser?.id === user.id}
                         className={`rounded-lg border px-2.5 py-2 text-[10px] font-bold transition-colors disabled:cursor-wait disabled:opacity-50 ${user.isActive ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
                         aria-label={user.isActive ? `Tạm khóa ${user.name}` : `Kích hoạt ${user.name}`}
@@ -385,7 +411,7 @@ export default function UserManagement() {
                       <button type="button" onClick={() => openEditModal(user)} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600" aria-label={`Sửa ${user.name}`} title="Sửa thông tin">
                         <Edit3 size={15} />
                       </button>
-                      <button type="button" onClick={() => void deleteUser(user)} disabled={busyUserId === user.id || currentUser?.id === user.id} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Xóa ${user.name}`} title={currentUser?.id === user.id ? 'Bạn không thể tự xóa tài khoản' : 'Xóa nhân sự'}>
+                      <button type="button" onClick={() => setPendingDelete(user)} disabled={busyUserId === user.id || currentUser?.id === user.id} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50" aria-label={`Xóa ${user.name}`} title={currentUser?.id === user.id ? 'Bạn không thể tự xóa tài khoản' : 'Xóa nhân sự'}>
                         <Trash2 size={15} />
                       </button>
                     </div>
@@ -454,6 +480,25 @@ export default function UserManagement() {
           </section>
         </div>
       )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Xóa nhân sự?"
+        description={pendingDelete ? `Bạn có chắc muốn xóa ${pendingDelete.name}? Thao tác này không thể hoàn tác.` : ''}
+        confirmLabel="Xóa nhân sự"
+        destructive
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete ? deleteUser(pendingDelete) : undefined}
+      />
+      <ConfirmModal
+        open={pendingStatusChange !== null}
+        title={pendingStatusChange?.isActive ? 'Khóa tài khoản?' : 'Kích hoạt tài khoản?'}
+        description={pendingStatusChange ? `${pendingStatusChange.isActive ? 'Người dùng sẽ không thể đăng nhập' : 'Người dùng sẽ có thể đăng nhập'}: ${pendingStatusChange.name}.` : ''}
+        confirmLabel={pendingStatusChange?.isActive ? 'Khóa tài khoản' : 'Kích hoạt'}
+        destructive={pendingStatusChange?.isActive ?? false}
+        onCancel={() => setPendingStatusChange(null)}
+        onConfirm={() => pendingStatusChange ? toggleActive(pendingStatusChange) : undefined}
+      />
     </div>
   );
 }

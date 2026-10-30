@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
+import toast from 'react-hot-toast';
 import { TASK_STATUSES, STATUS_META, type Task } from '../types';
 import {
   CheckCircle2,
@@ -39,6 +40,7 @@ export default function Dashboard() {
       setTasks(fetchedTasks);
     } catch {
       console.error('Không thể tải dữ liệu dashboard');
+      toast.error('Không thể tải dữ liệu dashboard.');
     } finally {
       setLoading(false);
     }

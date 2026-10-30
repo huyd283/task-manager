@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { TASK_STATUSES, STATUS_META, type Project, type Task, type TaskStatus } from '../types';
 import { Plus, Calendar, AlertCircle, MoreHorizontal } from 'lucide-react';
 import TaskModal from '../components/TaskModal';
+import toast from 'react-hot-toast';
 
 export default function KanbanBoard() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -27,6 +28,7 @@ export default function KanbanBoard() {
       setProjects(projectResponse.data.data ?? []);
     } catch (err) {
       setError('Không thể tải danh sách công việc');
+      toast.error('Không thể tải danh sách công việc.');
     } finally {
       setLoading(false);
     }
@@ -55,8 +57,10 @@ export default function KanbanBoard() {
     // Gọi API cập nhật backend
     try {
       await api.patch(`/tasks/${taskId}/status`, { status: newStatus });
+      toast.success(`Đã chuyển công việc sang ${STATUS_META[newStatus].label}.`);
     } catch (err) {
       // Nếu lỗi thì tải lại dữ liệu cũ
+      toast.error((err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.');
       void load();
     }
   };

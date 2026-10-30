@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import toast from 'react-hot-toast';
 
 export default function Login() {
   const { login } = useAuth();
@@ -14,14 +15,17 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setSubmitting(true);
+    const toastId = toast.loading('Đang đăng nhập...');
     try {
       await login(email, password);
+      toast.success('Đăng nhập thành công.', { id: toastId });
       navigate('/dashboard');
     } catch (err) {
       const message =
         (err as { response?: { data?: { message?: string } } }).response?.data?.message ??
         'Đăng nhập thất bại';
       setError(message);
+      toast.error(message, { id: toastId });
     } finally {
       setSubmitting(false);
     }

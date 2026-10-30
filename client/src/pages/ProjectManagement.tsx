@@ -3,6 +3,8 @@ import { AlertCircle, BriefcaseBusiness, Check, Edit3, FolderKanban, Plus, Trash
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { AssignableUser, Project, ProjectStatus } from '../types';
+import toast from 'react-hot-toast';
+import ConfirmModal from '../components/common/ConfirmModal';
 
 const STATUSES: Array<{ value: ProjectStatus; label: string; style: string }> = [
   { value: 'PLANNING', label: 'Lên kế hoạch', style: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -34,6 +36,7 @@ export default function ProjectManagement() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,7 +49,9 @@ export default function ProjectManagement() {
       setProjects(projectResponse.data.data ?? []);
       setUsers(userResponse.data.data ?? []);
     } catch (err) {
-      setError((err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được dữ liệu dự án.');
+      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được dữ liệu dự án.';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -78,26 +83,36 @@ export default function ProjectManagement() {
     event.preventDefault();
     setSaving(true);
     setFormError('');
+    const toastId = toast.loading(editing ? 'Đang cập nhật dự án...' : 'Đang tạo dự án...');
     try {
       const payload = { ...form, code: form.code.trim(), name: form.name.trim(), memberIds: form.memberIds.map(Number) };
       if (editing) await api.put(`/projects/${editing.id}`, payload);
       else await api.post('/projects', payload);
+      toast.success(editing ? 'Đã cập nhật dự án.' : 'Đã tạo dự án mới.', { id: toastId });
       setModalOpen(false);
       await load();
     } catch (err) {
-      setFormError((err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể lưu dự án.');
+      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể lưu dự án.';
+      setFormError(message);
+      toast.error(message, { id: toastId });
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (project: Project) => {
-    if (!window.confirm(`Xóa dự án ${project.code}?`)) return;
+    const toastId = toast.loading('Đang xóa dự án...');
     try {
       await api.delete(`/projects/${project.id}`);
+      toast.success(`Đã xóa dự án ${project.code}.`, { id: toastId });
+      setPendingDelete(null);
       await load();
+      return true;
     } catch (err) {
-      setError((err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể xóa dự án.');
+      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể xóa dự án.';
+      setError(message);
+      toast.error(message, { id: toastId });
+      return false;
     }
   };
 
@@ -167,7 +182,7 @@ export default function ProjectManagement() {
                   <div className="flex gap-1">
                     {canManage && <>
                       <button onClick={() => openEdit(project)} title="Sửa dự án" className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"><Edit3 size={15} /></button>
-                      <button onClick={() => void remove(project)} title="Xóa dự án" className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button>
+                      <button onClick={() => setPendingDelete(project)} title="Xóa dự án" className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button>
                     </>}
                   </div>
                 </article>
@@ -202,6 +217,16 @@ export default function ProjectManagement() {
           </form>
         </div>
       )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Xóa dự án?"
+        description={pendingDelete ? `Bạn sắp xóa dự án ${pendingDelete.code} · ${pendingDelete.name}. Dự án đang có task sẽ không thể bị xóa.` : ''}
+        confirmLabel="Xóa dự án"
+        destructive
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete ? remove(pendingDelete) : undefined}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { api } from '../api/client';
+import toast from 'react-hot-toast';
 import { TASK_STATUSES, STATUS_META, type AssignableUser, type Project, type Task, type TaskStatus } from '../types';
 import {
   X,
@@ -89,7 +90,10 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
         }
       })
       .catch(() => {
-        if (!cancelled) setAssigneeLoadError('Không tải được danh sách nhân sự để phân công.');
+        if (!cancelled) {
+          setAssigneeLoadError('Không tải được danh sách nhân sự để phân công.');
+          toast.error('Không tải được danh sách dự án hoặc nhân sự để phân công.');
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingAssignees(false);
@@ -111,14 +115,17 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
     e.preventDefault();
     if (!form.title.trim()) {
       setError('Vui lòng nhập tiêu đề công việc');
+      toast.error('Vui lòng nhập tiêu đề công việc.');
       return;
     }
     if (!form.projectId) {
       setError('Vui lòng chọn dự án');
+      toast.error('Vui lòng chọn dự án.');
       return;
     }
     setError('');
     setSaving(true);
+    const toastId = toast.loading(isEdit ? 'Đang cập nhật công việc...' : 'Đang tạo công việc...');
     try {
       const payload = toPayload(form);
       if (isEdit && task) {
@@ -126,12 +133,14 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       } else {
         await api.post('/tasks', payload);
       }
+      toast.success(isEdit ? 'Đã cập nhật công việc.' : 'Đã tạo công việc.', { id: toastId });
       onSaved();
     } catch (err) {
       const message =
         (err as { response?: { data?: { message?: string } } }).response?.data?.message ??
         'Lưu công việc thất bại';
       setError(message);
+      toast.error(message, { id: toastId });
     } finally {
       setSaving(false);
     }

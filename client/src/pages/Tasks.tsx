@@ -4,6 +4,7 @@ import TaskModal from '../components/TaskModal';
 import { TASK_STATUSES, STATUS_META, type Task, type TaskStatus } from '../types';
 import { Plus, Filter, Edit3, Trash2, Calendar, Folder, UserCheck, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ConfirmModal from '../components/common/ConfirmModal';
 
 export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -12,6 +13,7 @@ export default function Tasks() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,6 +28,7 @@ export default function Tasks() {
         (err as { response?: { data?: { message?: string } } }).response?.data?.message ??
         'Không tải được danh sách công việc';
       setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -38,21 +41,28 @@ export default function Tasks() {
   const changeStatus = async (task: Task, status: TaskStatus) => {
     // Optimistic update
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status } : t)));
+    const toastId = toast.loading('Đang cập nhật trạng thái...');
     try {
       await api.patch(`/tasks/${task.id}/status`, { status });
+      toast.success(`Đã chuyển ${task.taskCode} sang ${STATUS_META[status].label}.`, { id: toastId });
       void load();
-    } catch {
+    } catch (error) {
+      toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.', { id: toastId });
       void load();
     }
   };
 
   const remove = async (task: Task) => {
-    if (!window.confirm(`Xoá công việc ${task.taskCode}?`)) return;
+    const toastId = toast.loading('Đang xóa công việc...');
     try {
       await api.delete(`/tasks/${task.id}`);
+      toast.success(`Đã xóa công việc ${task.taskCode}.`, { id: toastId });
+      setPendingDelete(null);
       void load();
-    } catch {
-      toast.error('Không thể xóa công việc này');
+      return true;
+    } catch (error) {
+      toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể xóa công việc này.', { id: toastId });
+      return false;
     }
   };
 
@@ -269,7 +279,7 @@ export default function Tasks() {
                           <Edit3 size={15} />
                         </button>
                         <button
-                          onClick={() => remove(task)}
+                          onClick={() => setPendingDelete(task)}
                           className="p-1.5 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-lg transition-colors"
                           title="Xóa công việc"
                         >
@@ -323,6 +333,16 @@ export default function Tasks() {
           }}
         />
       )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Xóa công việc?"
+        description={pendingDelete ? `Bạn sắp xóa ${pendingDelete.taskCode}. Thao tác này không thể hoàn tác.` : ''}
+        confirmLabel="Xóa công việc"
+        destructive
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete ? remove(pendingDelete) : undefined}
+      />
     </div>
   );
 }
