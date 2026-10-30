@@ -54,7 +54,7 @@ services:
     container_name: taskmanager_frontend
     restart: always
     ports:
-      - "80:80"                  # Web truy cập qua Port 8080 của Server 3
+      - "8080:80"                  # Web truy cập qua Port 8080 của Server 3
     depends_on:
       - backend
     networks:
