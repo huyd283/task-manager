@@ -17,6 +17,7 @@ import {
   Settings,
   UserCheck,
   FolderKanban,
+  AlarmClock,
 } from "lucide-react";
 import logoFull from "../assets/img/logo/logo.jpg";
 import logoSmall from "../assets/img/logo/logo-small.jpg";
@@ -233,6 +234,10 @@ export default function Layout() {
                   <NavLink to="/tasks" className={subNavItemClass}>
                     <ListTodo size={14} />
                     <span>Danh sách Task</span>
+                  </NavLink>
+                  <NavLink to="/urgent" className={subNavItemClass}>
+                    <AlarmClock size={14} />
+                    <span>Công việc gấp</span>
                   </NavLink>
                 </div>
               )}

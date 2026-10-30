@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 1. Database MySQL
+  db:
+    image: mysql:8.0
+    container_name: taskmanager_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword_secret
+      MYSQL_DATABASE: task_manager_db
+      MYSQL_USER: taskuser
+      MYSQL_PASSWORD: taskpassword_secret
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # - ./server/src/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - taskmanager_net
+
+  # 2. Backend API (Node.js/Express)
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: taskmanager_backend
+    restart: always
+    environment:
+      PORT: 5000
+      DB_HOST: db                   # Tên service 'db' ở trên
+      DB_USER: taskuser
+      DB_PASS: taskpassword_secret
+      DB_NAME: task_manager_db
+      JWT_SECRET: taskmanager_jwt_secret_key_2026
+      # EMAIL_USER: "your_gmail@gmail.com"
+      # EMAIL_PASS: "your_app_password"
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - taskmanager_net
+
+  # 3. Frontend Web (React + Nginx)
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: taskmanager_frontend
+    restart: always
+    ports:
+      - "80:80"                  # Web truy cập qua Port 8080 của Server 3
+    depends_on:
+      - backend
+    networks:
+      - taskmanager_net
+
+volumes:
+  mysql_data:
+
+networks:
+  taskmanager_net:
+    driver: bridge

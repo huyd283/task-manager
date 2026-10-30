@@ -14,6 +14,7 @@
     "db:migrate:task-assignees": "npm --prefix server run db:migrate:task-assignees",
     "db:migrate:projects": "npm --prefix server run db:migrate:projects",
     "db:migrate:registration-otp": "npm --prefix server run db:migrate:registration-otp",
+    "db:migrate:task-workflow": "npm --prefix server run db:migrate:task-workflow",
     "install:all": "npm install && npm --prefix server install && npm --prefix client install"
   },
   "devDependencies": {

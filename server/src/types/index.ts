@@ -2,12 +2,16 @@
 export const TASK_STATUSES = [
   'TODO',
   'IN_PROGRESS',
-  'IN_REVIEW',
+  'DEV_DONE',
+  'TESTING',
+  'TEST_FAIL',
   'DONE',
   'PENDING',
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
 export interface Task {
   id: number;
@@ -17,6 +21,7 @@ export interface Task {
   title: string;
   description: string | null;
   status: TaskStatus;
+  priority: TaskPriority;
   assigneeId: number | null;
   assignee: string | null;
   startDate: string | null;
@@ -53,6 +58,7 @@ export interface CreateTaskInput {
   title: string;
   description?: string | null;
   status?: TaskStatus;
+  priority?: TaskPriority;
   assigneeId?: number | null;
   startDate?: string | null;
   estimatedDate?: string | null;

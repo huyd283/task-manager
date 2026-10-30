@@ -44,6 +44,7 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/kanban" element={<KanbanBoard/>} />
         <Route path="/tasks" element={<Tasks />} />
+        <Route path="/urgent" element={<Tasks urgentOnly />} />
         <Route path="/projects" element={<ProjectManagement />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/users" element={<AdminOnly><UserManagement /></AdminOnly>} />

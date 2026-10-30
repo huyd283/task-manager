@@ -62,7 +62,9 @@ export default function Reports() {
               <th className="px-4 py-3 font-medium text-center">Tổng</th>
               <th className="px-4 py-3 font-medium text-center">To Do</th>
               <th className="px-4 py-3 font-medium text-center">In Progress</th>
-              <th className="px-4 py-3 font-medium text-center">In Review</th>
+              <th className="px-4 py-3 font-medium text-center">Dev Done</th>
+              <th className="px-4 py-3 font-medium text-center">Testing</th>
+              <th className="px-4 py-3 font-medium text-center">Test Fail</th>
               <th className="px-4 py-3 font-medium text-center">Done</th>
               <th className="px-4 py-3 font-medium text-center">Pending</th>
               <th className="px-4 py-3 font-medium text-center">Trễ hạn</th>
@@ -72,7 +74,7 @@ export default function Reports() {
           <tbody>
             {stats.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
                   Chưa có dữ liệu
                 </td>
               </tr>
@@ -83,7 +85,9 @@ export default function Reports() {
                   <td className="px-4 py-3 text-center">{s.total}</td>
                   <td className="px-4 py-3 text-center text-slate-500">{s.todo}</td>
                   <td className="px-4 py-3 text-center text-blue-600">{s.inProgress}</td>
-                  <td className="px-4 py-3 text-center text-amber-600">{s.inReview}</td>
+                  <td className="px-4 py-3 text-center text-violet-600">{s.devDone}</td>
+                  <td className="px-4 py-3 text-center text-amber-600">{s.testing}</td>
+                  <td className="px-4 py-3 text-center text-rose-600">{s.testFail}</td>
                   <td className="px-4 py-3 text-center text-emerald-600">{s.done}</td>
                   <td className="px-4 py-3 text-center text-rose-500">{s.pending}</td>
                   <td className="px-4 py-3 text-center">

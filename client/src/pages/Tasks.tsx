@@ -1,16 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import TaskModal from '../components/TaskModal';
-import { TASK_STATUSES, STATUS_META, type Task, type TaskStatus } from '../types';
+import {
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  STATUS_META,
+  PRIORITY_META,
+  getDeadlineState,
+  getTaskPriority,
+  type AssignableUser,
+  type Project,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+} from '../types';
 import { Plus, Filter, Edit3, Trash2, Calendar, Folder, UserCheck, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 
-export default function Tasks() {
+export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | ''>('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
@@ -20,7 +37,12 @@ export default function Tasks() {
     setError('');
     try {
       const res = await api.get('/tasks', {
-        params: statusFilter ? { status: statusFilter } : {},
+        params: {
+          ...(statusFilter ? { status: statusFilter } : {}),
+          ...(assigneeFilter ? { assigneeId: assigneeFilter } : {}),
+          ...(projectFilter ? { projectId: projectFilter } : {}),
+          ...(priorityFilter ? { priority: priorityFilter } : {}),
+        },
       });
       setTasks(res.data.data);
     } catch (err) {
@@ -32,7 +54,19 @@ export default function Tasks() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [assigneeFilter, priorityFilter, projectFilter, statusFilter]);
+
+  useEffect(() => {
+    Promise.all([
+      api.get<{ data: Project[] }>('/projects'),
+      api.get<{ data: AssignableUser[] }>('/users/options'),
+    ])
+      .then(([projectResponse, assigneeResponse]) => {
+        setProjects(projectResponse.data.data ?? []);
+        setAssignees(assigneeResponse.data.data ?? []);
+      })
+      .catch(() => toast.error('Không tải được dữ liệu bộ lọc dự án và nhân sự.'));
+  }, []);
 
   useEffect(() => {
     void load();
@@ -76,15 +110,18 @@ export default function Tasks() {
     setModalOpen(true);
   };
 
-  const isOverdue = (task: Task) =>
-    task.status !== 'DONE' && task.dueDate !== null && task.dueDate < new Date().toISOString().slice(0, 10);
+  const visibleTasks = urgentOnly
+    ? tasks.filter((task) => getDeadlineState(task.dueDate, task.status) !== null)
+    : tasks;
 
   // Helper render màu badge trạng thái sống động
   const renderStatusBadge = (status: TaskStatus) => {
     const config: Record<string, { bg: string; text: string; border: string; dot: string }> = {
       TODO: { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200', dot: 'bg-slate-400' },
       IN_PROGRESS: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200/60', dot: 'bg-blue-500' },
-      IN_REVIEW: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200/60', dot: 'bg-amber-500' },
+      DEV_DONE: { bg: 'bg-violet-50', text: 'text-violet-700', border: 'border-violet-200/60', dot: 'bg-violet-500' },
+      TESTING: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200/60', dot: 'bg-amber-500' },
+      TEST_FAIL: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200/60', dot: 'bg-rose-500' },
       DONE: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200/60', dot: 'bg-emerald-500' },
       PENDING: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200/60', dot: 'bg-rose-500' },
     };
@@ -107,16 +144,18 @@ export default function Tasks() {
         
         <div className="pl-2">
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-            Công việc
+            {urgentOnly ? 'Công việc gấp' : 'Công việc'}
             <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-600 rounded-full border border-blue-100">
-              {tasks.length}
+              {visibleTasks.length}
             </span>
           </h1>
-          <p className="text-xs text-slate-500 mt-1">Quản lý và theo dõi tiến độ công việc dự án</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {urgentOnly ? 'Các task sắp hết hạn trong 24 giờ hoặc đã quá hạn' : 'Quản lý và theo dõi tiến độ công việc dự án'}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Bộ lọc trạng thái */}
+          {/* Bộ lọc danh sách task */}
           <div className="relative">
             <select
               className="pl-3 pr-8 py-2 text-xs font-semibold bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all shadow-sm"
@@ -132,6 +171,33 @@ export default function Tasks() {
             </select>
             <Filter size={14} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
           </div>
+          <select
+            aria-label="Lọc theo người phụ trách"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            value={assigneeFilter}
+            onChange={(event) => setAssigneeFilter(event.target.value)}
+          >
+            <option value="">Tất cả thành viên</option>
+            {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
+          </select>
+          <select
+            aria-label="Lọc theo dự án"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            value={projectFilter}
+            onChange={(event) => setProjectFilter(event.target.value)}
+          >
+            <option value="">Tất cả dự án</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.code}</option>)}
+          </select>
+          <select
+            aria-label="Lọc theo mức độ ưu tiên"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            value={priorityFilter}
+            onChange={(event) => setPriorityFilter(event.target.value as TaskPriority | '')}
+          >
+            <option value="">Mọi mức ưu tiên</option>
+            {TASK_PRIORITIES.map((priority) => <option key={priority} value={priority}>{PRIORITY_META[priority].label}</option>)}
+          </select>
 
           {/* Nút Tạo mới với hiệu ứng Shadow Gradient */}
           <button
@@ -162,6 +228,7 @@ export default function Tasks() {
                 <th className="py-3.5 px-4 min-w-[220px]">Tiêu đề</th>
                 <th className="py-3.5 px-4">Dự án</th>
                 <th className="py-3.5 px-4">Phụ trách</th>
+                <th className="py-3.5 px-4">Ưu tiên</th>
                 <th className="py-3.5 px-4">Trạng thái</th>
                 <th className="py-3.5 px-4">Hạn chót</th>
                 <th className="py-3.5 px-4 text-right">Thao tác</th>
@@ -170,22 +237,26 @@ export default function Tasks() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2 font-medium">
                       <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       <span>Đang tải dữ liệu...</span>
                     </div>
                   </td>
                 </tr>
-              ) : tasks.length === 0 ? (
+              ) : visibleTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
+                  <td colSpan={8} className="py-12 text-center text-slate-400 font-medium">
                     Chưa có công việc nào trong danh sách
                   </td>
                 </tr>
               ) : (
-                tasks.map((task) => (
-                  <tr key={task.id} className="hover:bg-blue-50/30 transition-colors group">
+                visibleTasks.map((task) => {
+                  const deadlineState = getDeadlineState(task.dueDate, task.status);
+                  return (
+                  <tr key={task.id} className={`hover:bg-blue-50/30 transition-colors group ${
+                    deadlineState === 'overdue' ? 'bg-rose-50/40' : deadlineState === 'soon' ? 'bg-amber-50/40' : ''
+                  }`}>
                     {/* Mã Task */}
                     <td className="py-3.5 px-4 font-mono font-bold text-slate-500">
                       <span className="bg-slate-100 group-hover:bg-blue-100/60 group-hover:text-blue-700 px-2 py-0.5 rounded transition-colors">
@@ -232,6 +303,13 @@ export default function Tasks() {
                       )}
                     </td>
 
+                    {/* Mức độ ưu tiên */}
+                    <td className="py-3.5 px-4">
+                      <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${PRIORITY_META[getTaskPriority(task.priority)].badge}`}>
+                        {PRIORITY_META[getTaskPriority(task.priority)].label}
+                      </span>
+                    </td>
+
                     {/* Trạng thái Select */}
                     <td className="py-3.5 px-4">
                       <div className="relative inline-block">
@@ -254,17 +332,26 @@ export default function Tasks() {
                       <div className="flex items-center gap-1.5">
                         <Calendar
                           size={13}
-                          className={isOverdue(task) ? 'text-rose-500 animate-bounce' : 'text-slate-400'}
+                          className={deadlineState === 'overdue' ? 'text-rose-500 animate-bounce' : deadlineState === 'soon' ? 'text-amber-500' : 'text-slate-400'}
                         />
                         <span
                           className={`font-semibold ${
-                            isOverdue(task)
+                            deadlineState === 'overdue'
                               ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200/60'
-                              : 'text-slate-600'
+                              : deadlineState === 'soon'
+                                ? 'text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60'
+                                : 'text-slate-600'
                           }`}
                         >
                           {task.dueDate ?? '—'}
                         </span>
+                        {deadlineState && (
+                          <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
+                            deadlineState === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {deadlineState === 'overdue' ? 'Quá hạn' : 'Sắp hết hạn'}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -288,7 +375,8 @@ export default function Tasks() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -297,7 +385,7 @@ export default function Tasks() {
         {/* Footer Phân trang */}
         <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between text-xs text-slate-500">
           <span>
-            Hiển thị <strong className="text-slate-700">{tasks.length}</strong> công việc
+            Hiển thị <strong className="text-slate-700">{visibleTasks.length}</strong> công việc
           </span>
           <div className="flex gap-1.5">
             <button className="px-3 py-1 border border-slate-200 rounded-lg bg-white text-slate-400 cursor-not-allowed font-medium" disabled>

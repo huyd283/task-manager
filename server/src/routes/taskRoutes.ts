@@ -10,6 +10,9 @@ router.get('/stats/by-assignee', asyncHandler(taskController.stats));
 
 router.get('/', asyncHandler(taskController.list));
 router.post('/', asyncHandler(taskController.create));
+router.get('/:id/history', asyncHandler(taskController.history));
+router.get('/:id/attachments', asyncHandler(taskController.attachments));
+router.post('/:id/attachments', asyncHandler(taskController.addAttachment));
 router.get('/:id', asyncHandler(taskController.getOne));
 router.put('/:id', asyncHandler(taskController.update));
 router.patch('/:id/status', asyncHandler(taskController.updateStatus));

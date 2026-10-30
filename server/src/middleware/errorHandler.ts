@@ -27,6 +27,10 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return res.status(409).json({ message: 'Duplicate value violates a unique constraint' });
   }
 
+  if (typeof err === 'object' && err !== null && (err as { type?: string }).type === 'entity.too.large') {
+    return res.status(413).json({ message: 'Request body exceeds the 12 MB limit' });
+  }
+
   console.error('[Unhandled error]', err);
   res.status(500).json({ message: 'Internal server error' });
 }

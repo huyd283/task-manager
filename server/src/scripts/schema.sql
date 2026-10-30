@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   project_id     INT NOT NULL,
   title          VARCHAR(255) NOT NULL,
   description    TEXT         NULL,
-  status         ENUM('TODO','IN_PROGRESS','IN_REVIEW','DONE','PENDING') NOT NULL DEFAULT 'TODO',
+  status         ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING') NOT NULL DEFAULT 'TODO',
+  priority       ENUM('LOW','MEDIUM','HIGH','URGENT') NOT NULL DEFAULT 'MEDIUM',
   assignee_user_id INT        NULL,
   assignee       VARCHAR(120) NULL,
   start_date     DATE         NULL,
@@ -72,4 +73,30 @@ CREATE TABLE IF NOT EXISTS tasks (
     REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_tasks_project FOREIGN KEY (project_id)
     REFERENCES projects (id) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS task_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  task_id INT NOT NULL,
+  user_id INT NULL,
+  action_type VARCHAR(40) NOT NULL,
+  old_value TEXT NULL,
+  new_value TEXT NULL,
+  `timestamp` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_task_history_task_timestamp (task_id, `timestamp`),
+  CONSTRAINT fk_task_history_task FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_task_history_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  task_id INT NOT NULL,
+  user_id INT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  file_data MEDIUMBLOB NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_task_attachments_task_created (task_id, created_at),
+  CONSTRAINT fk_task_attachments_task FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_task_attachments_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

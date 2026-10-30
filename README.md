@@ -70,9 +70,19 @@ npm run db:migrate:registration-otp
 
 Với Gmail, bật xác minh 2 bước và tạo Google App Password; đặt giá trị đó ở `EMAIL_PASS` (không dùng mật khẩu đăng nhập Gmail). Không commit file `server/.env` hoặc đưa App Password vào mã nguồn. Mã OTP được lưu dạng HMAC, hết hạn sau 5 phút, giới hạn 5 lần nhập sai và chỉ gửi lại sau 60 giây.
 
+Để nâng cấp workflow, mức ưu tiên, lịch sử thao tác và bảng lưu tệp đính kèm trên database đang có dữ liệu, chạy:
+
+```bash
+npm run db:migrate:task-workflow
+```
+
+Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_FAIL` và mức ưu tiên mặc định `MEDIUM`; dữ liệu task hiện có được giữ nguyên. Hãy chạy migration trước khi triển khai backend/frontend mới. Tệp đính kèm hỗ trợ ảnh dưới 5 MB; PDF và text tối đa 8 MB mỗi tệp.
+Với database từ phiên bản cũ, hãy chạy sau các migration `users`, `task-assignees` và `projects` nếu những phần đó chưa được nâng cấp.
+Backend cũng tự kiểm tra và áp dụng migration này trước khi mở cổng nhận request. Tài khoản database chạy ứng dụng cần quyền `ALTER` và `CREATE`; nếu muốn tách migration khỏi lúc khởi động, hãy chạy lệnh migration trong bước deploy trước khi khởi động backend.
+
 ## 4. Khởi tạo database + seed mock data
 
-Script này tạo database nếu chưa có, tạo bảng `users`, `projects`, `project_members`, `tasks` và nạp dữ liệu mẫu:
+Script này tạo database nếu chưa có, tạo bảng ứng dụng (gồm `users`, `projects`, `project_members`, `tasks`, `task_history`, `task_attachments`) và nạp dữ liệu mẫu:
 
 ```bash
 npm run db:init
@@ -118,11 +128,14 @@ Tài khoản chỉ được tạo sau OTP hợp lệ. Mã nhân viên mới có 
 
 | Method | Endpoint                        | Mô tả                                   |
 | ------ | ------------------------------- | --------------------------------------- |
-| GET    | `/api/tasks`                    | Danh sách theo quyền dự án (lọc `?status=&assignee=&projectId=`) |
+| GET    | `/api/tasks`                    | Danh sách theo quyền dự án (lọc `?status=&assigneeId=&projectId=&priority=`) |
 | GET    | `/api/tasks/:id`                | Chi tiết một task                        |
 | POST   | `/api/tasks`                    | Tạo task                                 |
 | PUT    | `/api/tasks/:id`                | Cập nhật toàn bộ task                    |
 | PATCH  | `/api/tasks/:id/status`         | Cập nhật trạng thái `{ status }`         |
+| GET    | `/api/tasks/:id/history`        | Lịch sử thao tác và người thay đổi       |
+| GET    | `/api/tasks/:id/attachments`    | Danh sách ảnh/tệp đính kèm               |
+| POST   | `/api/tasks/:id/attachments`    | Tải tệp lên bằng `{ fileName, mimeType, dataBase64 }` |
 | DELETE | `/api/tasks/:id`                | Xoá task                                 |
 | GET    | `/api/tasks/stats/by-assignee`  | Thống kê báo cáo theo nhân sự            |
 
@@ -156,14 +169,14 @@ Chức danh công việc (`Project Lead`, `Developer`, `Tester`, `Designer`) đ�
 
 ### Trạng thái (status)
 
-`TODO` · `IN_PROGRESS` · `IN_REVIEW` · `DONE` · `PENDING`
+`TODO` · `IN_PROGRESS` · `DEV_DONE` · `TESTING` · `TEST_FAIL` · `DONE` · `PENDING`
 
 ### Model Task
 
 ```ts
 {
   id, taskCode, projectId, project, title, description,
-  status, assignee,
+  status, priority, assignee,
   startDate, estimatedDate, dueDate, actualDate,
   createdAt, updatedAt
 }
@@ -176,6 +189,7 @@ Chức danh công việc (`Project Lead`, `Developer`, `Tester`, `Designer`) đ�
 | `npm run dev`          | Chạy backend + frontend cùng lúc          |
 | `npm run db:init`      | Tạo bảng + seed mock data                 |
 | `npm run db:migrate:users` | Nâng cấp bảng users mà không xóa dữ liệu |
+| `npm run db:migrate:task-workflow` | Nâng cấp workflow, priority, lịch sử và tệp task |
 | `npm run build`        | Build cả server và client                 |
 | `npm run install:all`  | Cài dependencies cho root + server + client |
 # task-manager

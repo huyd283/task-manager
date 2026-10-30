@@ -1,7 +1,20 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type ClipboardEvent, type FormEvent, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import toast from 'react-hot-toast';
-import { TASK_STATUSES, STATUS_META, type AssignableUser, type Project, type Task, type TaskStatus } from '../types';
+import {
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  STATUS_META,
+  PRIORITY_META,
+  getTaskPriority,
+  type AssignableUser,
+  type Project,
+  type Task,
+  type TaskAttachment,
+  type TaskHistoryEntry,
+  type TaskPriority,
+  type TaskStatus,
+} from '../types';
 import {
   X,
   Plus,
@@ -14,6 +27,10 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
+  History,
+  Paperclip,
+  ImagePlus,
+  FileText,
 } from 'lucide-react';
 
 interface TaskModalProps {
@@ -28,6 +45,7 @@ interface FormState {
   title: string;
   description: string;
   status: TaskStatus;
+  priority: TaskPriority;
   assigneeId: string;
   startDate: string;
   estimatedDate: string;
@@ -42,6 +60,7 @@ function toForm(task: Task | null): FormState {
     title: task?.title ?? '',
     description: task?.description ?? '',
     status: task?.status ?? 'TODO',
+    priority: getTaskPriority(task?.priority),
     assigneeId: task?.assigneeId ? String(task.assigneeId) : '',
     startDate: task?.startDate ?? '',
     estimatedDate: task?.estimatedDate ?? '',
@@ -59,6 +78,7 @@ function toPayload(form: FormState) {
     title: form.title.trim(),
     description: clean(form.description),
     status: form.status,
+    priority: form.priority,
     assigneeId: form.assigneeId ? Number(form.assigneeId) : null,
     startDate: clean(form.startDate),
     estimatedDate: clean(form.estimatedDate),
@@ -75,7 +95,124 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingAssignees, setLoadingAssignees] = useState(true);
   const [assigneeLoadError, setAssigneeLoadError] = useState('');
+  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'attachments'>('details');
+  const [history, setHistory] = useState<TaskHistoryEntry[]>([]);
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingAttachments, setLoadingAttachments] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [attachmentError, setAttachmentError] = useState('');
+  const [previewAttachment, setPreviewAttachment] = useState<TaskAttachment | null>(null);
   const isEdit = Boolean(task);
+
+  useEffect(() => {
+    if (!task || activeTab !== 'history') return;
+    setLoadingHistory(true);
+    setHistoryError('');
+    api.get<{ data: TaskHistoryEntry[] }>(`/tasks/${task.id}/history`)
+      .then((response) => setHistory(response.data.data))
+      .catch((err: unknown) => {
+        const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được lịch sử thao tác.';
+        setHistoryError(message);
+        toast.error(message);
+      })
+      .finally(() => setLoadingHistory(false));
+  }, [activeTab, task]);
+
+  useEffect(() => {
+    if (!task || activeTab !== 'attachments') return;
+    setLoadingAttachments(true);
+    setAttachmentError('');
+    api.get<{ data: TaskAttachment[] }>(`/tasks/${task.id}/attachments`)
+      .then((response) => setAttachments(response.data.data))
+      .catch((err: unknown) => {
+        const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được tệp đính kèm.';
+        setAttachmentError(message);
+        toast.error(message);
+      })
+      .finally(() => setLoadingAttachments(false));
+  }, [activeTab, task]);
+
+  const uploadAttachment = async (file: File) => {
+    if (!task) return;
+    if (file.type.startsWith('image/') && file.size >= 5 * 1024 * 1024) {
+      throw new Error(`${file.name}: ảnh phải nhỏ hơn 5 MB.`);
+    }
+    if (!file.type.startsWith('image/') && file.size > 8 * 1024 * 1024) {
+      throw new Error(`${file.name}: PDF và tệp văn bản tối đa 8 MB.`);
+    }
+    const reader = new FileReader();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Không đọc được tệp.'));
+      reader.onerror = () => reject(new Error(`Không đọc được tệp ${file.name}.`));
+      reader.readAsDataURL(file);
+    });
+    const dataBase64 = dataUrl.split(',')[1];
+    if (!dataBase64) throw new Error(`Không mã hóa được tệp ${file.name}.`);
+    await api.post(`/tasks/${task.id}/attachments`, {
+      fileName: file.name,
+      mimeType: file.type,
+      dataBase64,
+    });
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (!task || files.length === 0) return;
+    const acceptedTypes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'application/pdf',
+      'text/plain',
+    ]);
+    const validFiles = files.filter((file) => (
+      acceptedTypes.has(file.type) &&
+      (file.type.startsWith('image/')
+        ? file.size < 5 * 1024 * 1024
+        : file.size <= 8 * 1024 * 1024)
+    ));
+    const rejectedFiles = files.filter((file) => !validFiles.includes(file));
+    if (rejectedFiles.length > 0) {
+      const message = rejectedFiles.map((file) => {
+        if (!acceptedTypes.has(file.type)) return `${file.name}: loại tệp không được hỗ trợ.`;
+        return file.type.startsWith('image/')
+          ? `${file.name}: ảnh phải nhỏ hơn 5 MB.`
+          : `${file.name}: PDF và tệp văn bản tối đa 8 MB.`;
+      }).join(' ');
+      setAttachmentError(message);
+      toast.error(message);
+    } else {
+      setAttachmentError('');
+    }
+    if (validFiles.length === 0) return;
+    setUploadingAttachments(true);
+    try {
+      for (const file of validFiles) await uploadAttachment(file);
+      const response = await api.get<{ data: TaskAttachment[] }>(`/tasks/${task.id}/attachments`);
+      setAttachments(response.data.data);
+      toast.success(`Đã tải lên ${validFiles.length} tệp.`);
+    } catch (err) {
+      const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? (err instanceof Error ? err.message : 'Tải tệp lên thất bại.');
+      setAttachmentError(message);
+      toast.error(message);
+    } finally {
+      setUploadingAttachments(false);
+    }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const images = Array.from(event.clipboardData.items)
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (images.length > 0) {
+      event.preventDefault();
+      setActiveTab('attachments');
+      void uploadFiles(images);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -129,7 +266,8 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
     try {
       const payload = toPayload(form);
       if (isEdit && task) {
-        await api.put(`/tasks/${task.id}`, payload);
+        const { startDate: _startDate, estimatedDate: _estimatedDate, actualDate: _actualDate, ...updatePayload } = payload;
+        await api.put(`/tasks/${task.id}`, updatePayload);
       } else {
         await api.post('/tasks', payload);
       }
@@ -182,6 +320,28 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
 
         {/* Form Content */}
         <form onSubmit={onSubmit} className="p-6 space-y-5 overflow-y-auto flex-1 scrollbar-thin">
+          {isEdit && (
+            <div className="flex gap-2 border-b border-slate-100 pb-3">
+              {([
+                ['details', 'Chi tiết', <Edit3 size={14} key="details-icon" />],
+                ['history', 'Lịch sử thao tác', <History size={14} key="history-icon" />],
+                ['attachments', 'Tệp đính kèm', <Paperclip size={14} key="attachments-icon" />],
+              ] as const).map(([tab, label, icon]) => (
+                <button
+                  type="button"
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${
+                    activeTab === tab ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {icon}{label}
+                </button>
+              ))}
+            </div>
+          )}
+          {activeTab === 'details' && (
+          <>
           {error && (
             <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200/80 px-4 py-3 text-xs font-semibold text-rose-700">
               <AlertCircle size={16} className="text-rose-500 shrink-0" />
@@ -254,7 +414,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
             />
           </div>
 
-          {/* Trạng thái & Người phụ trách */}
+          {/* Trạng thái, ưu tiên & người phụ trách */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>
@@ -270,6 +430,21 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                   <option key={s} value={s}>
                     {STATUS_META[s].label}
                   </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>
+                <Tag size={14} className="text-rose-500" />
+                <span>Mức độ ưu tiên</span>
+              </label>
+              <select
+                className={`${inputClass} cursor-pointer`}
+                value={form.priority}
+                onChange={(e) => update('priority', e.target.value as TaskPriority)}
+              >
+                {TASK_PRIORITIES.map((priority) => (
+                  <option key={priority} value={priority}>{PRIORITY_META[priority].label}</option>
                 ))}
               </select>
             </div>
@@ -312,6 +487,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                   className={inputClass}
                   value={form.startDate}
                   onChange={(e) => update('startDate', e.target.value)}
+                  disabled={isEdit}
                 />
               </div>
               <div>
@@ -321,6 +497,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                   className={inputClass}
                   value={form.estimatedDate}
                   onChange={(e) => update('estimatedDate', e.target.value)}
+                  disabled={isEdit}
                 />
               </div>
               <div>
@@ -339,6 +516,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                   className={inputClass}
                   value={form.actualDate}
                   onChange={(e) => update('actualDate', e.target.value)}
+                  disabled={isEdit}
                 />
               </div>
             </div>
@@ -368,8 +546,123 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
               )}
             </button>
           </div>
+          </>
+          )}
+          {activeTab === 'history' && isEdit && (
+            <section className="space-y-3">
+              {loadingHistory ? <p className="py-8 text-center text-xs text-slate-400">Đang tải lịch sử...</p> :
+                historyError ? <p className="py-8 text-center text-xs text-rose-600">{historyError}</p> :
+                  history.length === 0 ? <p className="py-8 text-center text-xs text-slate-400">Chưa có thao tác nào được ghi nhận.</p> :
+                    history.map((entry) => (
+                      <article key={entry.id} className="flex gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                        <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-800">
+                            {entry.userName ?? 'Người dùng không xác định'} · {historyActionLabel(entry.actionType)}
+                          </p>
+                          <p className="mt-1 break-words text-[11px] text-slate-500">
+                            {formatHistoryValue(entry.actionType, entry.oldValue)} <span className="px-1 text-slate-300">→</span> {formatHistoryValue(entry.actionType, entry.newValue)}
+                          </p>
+                          <time className="mt-1 block text-[10px] text-slate-400">
+                            {new Date(entry.timestamp).toLocaleString('vi-VN')}
+                          </time>
+                        </div>
+                      </article>
+                    ))}
+            </section>
+          )}
+          {activeTab === 'attachments' && isEdit && (
+            <section className="space-y-4">
+              <div tabIndex={0} onPaste={handlePaste} className="space-y-4 rounded-xl outline-none focus:ring-2 focus:ring-blue-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">Ảnh phải nhỏ hơn 5 MB; PDF và tệp văn bản tối đa 8 MB. Có thể dán ảnh vào khu vực này.</p>
+                <label className={`inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 ${uploadingAttachments ? 'pointer-events-none opacity-60' : ''}`}>
+                  <ImagePlus size={15} />{uploadingAttachments ? 'Đang tải...' : 'Thêm tệp'}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain"
+                    multiple
+                    disabled={uploadingAttachments}
+                    onChange={(event) => {
+                      void uploadFiles(Array.from(event.target.files ?? []));
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+              {attachmentError && <p className="text-xs font-semibold text-rose-600">{attachmentError}</p>}
+              {loadingAttachments ? <p className="py-8 text-center text-xs text-slate-400">Đang tải tệp...</p> :
+                attachments.length === 0 ? <p className="py-8 text-center text-xs text-slate-400">Chưa có tệp đính kèm.</p> :
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {attachments.map((attachment) => {
+                      const dataUrl = `data:${attachment.mimeType};base64,${attachment.dataBase64}`;
+                      return (
+                        <button
+                          type="button"
+                          key={attachment.id}
+                          onClick={() => setPreviewAttachment(attachment)}
+                          className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left hover:border-blue-300"
+                        >
+                          {attachment.mimeType.startsWith('image/') ? (
+                            <img src={dataUrl} alt={attachment.fileName} className="h-28 w-full object-cover" />
+                          ) : (
+                            <div className="flex h-28 items-center justify-center bg-slate-50 text-slate-500"><FileText size={30} /></div>
+                          )}
+                          <span className="block truncate px-2 py-2 text-[11px] font-semibold text-slate-700">{attachment.fileName}</span>
+                        </button>
+                      );
+                    })}
+                  </div>}
+              </div>
+            </section>
+          )}
         </form>
       </div>
+      {previewAttachment && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 p-6" onClick={() => setPreviewAttachment(null)}>
+          <button type="button" className="absolute right-5 top-5 rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white">Đóng</button>
+          {previewAttachment.mimeType.startsWith('image/') ? (
+            <img
+              src={`data:${previewAttachment.mimeType};base64,${previewAttachment.dataBase64}`}
+              alt={previewAttachment.fileName}
+              className="max-h-full max-w-full object-contain"
+            />
+          ) : (
+            <iframe
+              title={previewAttachment.fileName}
+              src={`data:${previewAttachment.mimeType};base64,${previewAttachment.dataBase64}`}
+              className="h-[85vh] w-full max-w-4xl rounded-xl bg-white"
+              onClick={(event) => event.stopPropagation()}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function historyActionLabel(action: string): string {
+  const labels: Record<string, string> = {
+    taskCode: 'đổi mã công việc',
+    projectId: 'đổi dự án',
+    title: 'đổi tiêu đề',
+    description: 'cập nhật mô tả',
+    created: 'tạo công việc',
+    status: 'đổi trạng thái',
+    priority: 'đổi mức ưu tiên',
+    assigneeId: 'đổi người phụ trách',
+    estimatedDate: 'đổi ngày dự kiến',
+    dueDate: 'đổi hạn chót',
+    actualDate: 'cập nhật ngày hoàn thành',
+    attachment_added: 'đính kèm tệp',
+  };
+  return labels[action] ?? action;
+}
+
+function formatHistoryValue(action: string, value: string | null): string {
+  if (value === null) return '—';
+  if (action === 'status' && value in STATUS_META) return STATUS_META[value as TaskStatus].label;
+  if (action === 'priority' && value in PRIORITY_META) return PRIORITY_META[value as TaskPriority].label;
+  return value;
 }

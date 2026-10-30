@@ -7,7 +7,7 @@ import { env } from '../config/env';
 /**
  * One-shot setup script:
  *   1. creates the database (if missing)
- *   2. creates the `users` and `tasks` tables from schema.sql
+ *    2. creates the application tables from schema.sql
  *   3. seeds mock data so the app can be run and tested immediately
  *
  * Run with: `npm run db:init`
@@ -38,7 +38,7 @@ type TaskSeed = [
 const TASKS: TaskSeed[] = [
   ['TM-0001', 'Website Redesign', 'Thiết kế lại trang chủ', 'Dựng lại layout trang chủ theo brand mới.', 'DONE', 'Nguyen Van An', '2026-09-01', '2026-09-10', '2026-09-12', '2026-09-11'],
   ['TM-0002', 'Website Redesign', 'Tối ưu tốc độ tải trang', 'Lazy-load ảnh và tách bundle JS.', 'IN_PROGRESS', 'Tran Thi Binh', '2026-09-15', '2026-09-25', '2026-09-28', null],
-  ['TM-0003', 'Mobile App', 'Xây dựng màn hình đăng nhập', 'Form đăng nhập + lưu token.', 'IN_REVIEW', 'Le Van Cuong', '2026-09-20', '2026-09-30', '2026-10-02', null],
+  ['TM-0003', 'Mobile App', 'Xây dựng màn hình đăng nhập', 'Form đăng nhập + lưu token.', 'DEV_DONE', 'Le Van Cuong', '2026-09-20', '2026-09-30', '2026-10-02', null],
   ['TM-0004', 'Mobile App', 'Tích hợp push notification', 'Dùng FCM cho Android/iOS.', 'TODO', 'Pham Thi Dung', '2026-10-05', '2026-10-15', '2026-10-18', null],
   ['TM-0005', 'API Platform', 'Thiết kế schema cơ sở dữ liệu', 'ERD cho users, tasks, projects.', 'DONE', 'Nguyen Van An', '2026-08-20', '2026-08-28', '2026-08-30', '2026-08-27'],
   ['TM-0006', 'API Platform', 'Viết tài liệu API', 'Mô tả toàn bộ endpoint bằng OpenAPI.', 'PENDING', 'Tran Thi Binh', '2026-09-10', '2026-09-20', '2026-09-22', null],
@@ -46,7 +46,7 @@ const TASKS: TaskSeed[] = [
   ['TM-0008', 'Website Redesign', 'Kiểm thử giao diện responsive', 'Test trên mobile/tablet/desktop.', 'TODO', 'Tran Thi Binh', '2026-10-07', '2026-10-14', '2026-10-16', null],
   ['TM-0009', 'Mobile App', 'Sửa lỗi crash khi mở camera', 'Crash trên một số máy Android 13.', 'IN_PROGRESS', 'Pham Thi Dung', '2026-09-28', '2026-10-03', '2026-10-01', null],
   ['TM-0010', 'Data Pipeline', 'Thiết lập ETL hằng ngày', 'Job cron tổng hợp dữ liệu mỗi đêm.', 'DONE', 'Nguyen Van An', '2026-09-05', '2026-09-15', '2026-09-18', '2026-09-16'],
-  ['TM-0011', 'Data Pipeline', 'Xây dựng dashboard báo cáo', 'Biểu đồ theo nhân sự và trạng thái.', 'IN_REVIEW', 'Le Van Cuong', '2026-09-25', '2026-10-05', '2026-10-07', null],
+  ['TM-0011', 'Data Pipeline', 'Xây dựng dashboard báo cáo', 'Biểu đồ theo nhân sự và trạng thái.', 'TESTING', 'Le Van Cuong', '2026-09-25', '2026-10-05', '2026-10-07', null],
   ['TM-0012', 'API Platform', 'Rà soát bảo mật endpoint', 'Kiểm tra authz cho toàn bộ route.', 'PENDING', 'Pham Thi Dung', '2026-10-02', '2026-10-12', '2026-09-30', null],
 ];
 
@@ -71,10 +71,12 @@ async function main() {
   // 2. Create tables
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await connection.query(schema);
-  console.log('✓ Tables created (users, tasks)');
+  console.log('✓ Application tables created');
 
   // 3. Reset existing data so the seed is idempotent
   await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+  await connection.query('TRUNCATE TABLE task_history');
+  await connection.query('TRUNCATE TABLE task_attachments');
   await connection.query('TRUNCATE TABLE tasks');
   await connection.query('TRUNCATE TABLE project_members');
   await connection.query('TRUNCATE TABLE projects');

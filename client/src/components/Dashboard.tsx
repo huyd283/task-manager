@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import toast from 'react-hot-toast';
-import { TASK_STATUSES, STATUS_META, type Task } from '../types';
+import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task } from '../types';
+import { useAuth } from '../context/AuthContext';
 import {
   CheckCircle2,
   Clock,
@@ -28,13 +29,27 @@ import {
 } from 'recharts';
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterMode, setFilterMode] = useState<'personal' | 'project' | 'all'>('personal');
+  const [projectFilter, setProjectFilter] = useState('');
 
   const loadTasks = useCallback(async () => {
+    if (filterMode === 'project' && !projectFilter) {
+      setTasks([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await api.get('/tasks');
+      const params = filterMode === 'personal' && user
+        ? { assigneeId: user.id }
+        : filterMode === 'project'
+          ? { projectId: projectFilter }
+          : {};
+      const res = await api.get('/tasks', { params });
       // Đảm bảo lấy đúng mảng dữ liệu
       const fetchedTasks: Task[] = Array.isArray(res.data?.data) ? res.data.data : [];
       setTasks(fetchedTasks);
@@ -44,19 +59,24 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterMode, projectFilter, user]);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
 
+  useEffect(() => {
+    api.get<{ data: Project[] }>('/projects')
+      .then((response) => setProjects(response.data.data ?? []))
+      .catch(() => toast.error('Không tải được danh sách dự án cho bộ lọc Dashboard.'));
+  }, []);
+
   // 1. Tính toán KPI
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((t) => t.status === 'DONE').length;
   const inProgressTasks = tasks.filter((t) => t.status === 'IN_PROGRESS').length;
-  const todayStr = new Date().toISOString().slice(0, 10);
   const overdueTasks = tasks.filter(
-    (t) => t.status !== 'DONE' && t.dueDate && t.dueDate < todayStr
+    (t) => getDeadlineState(t.dueDate, t.status) === 'overdue'
   ).length;
 
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
@@ -65,7 +85,9 @@ export default function Dashboard() {
   const STATUS_COLORS: Record<string, string> = {
     TODO: '#94a3b8',
     IN_PROGRESS: '#3b82f6',
-    IN_REVIEW: '#f59e0b',
+    DEV_DONE: '#8b5cf6',
+    TESTING: '#f59e0b',
+    TEST_FAIL: '#f43f5e',
     DONE: '#10b981',
     PENDING: '#f43f5e',
   };
@@ -96,7 +118,7 @@ export default function Dashboard() {
 
   // 4. Danh sách Task quá hạn
   const overdueList = tasks
-    .filter((t) => t.status !== 'DONE' && t.dueDate && t.dueDate < todayStr)
+    .filter((t) => getDeadlineState(t.dueDate, t.status) === 'overdue')
     .slice(0, 5);
 
   return (
@@ -119,9 +141,36 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200/80 text-xs font-bold text-slate-600 shadow-2xs">
-          <Calendar size={15} className="text-blue-600" />
-          <span>Hôm nay: {new Date().toLocaleDateString('vi-VN')}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="dashboard-filter" className="text-xs font-bold text-slate-600">Phạm vi:</label>
+          <select
+            id="dashboard-filter"
+            value={filterMode}
+            onChange={(event) => {
+              setFilterMode(event.target.value as 'personal' | 'project' | 'all');
+              setProjectFilter('');
+            }}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="personal">Theo cá nhân</option>
+            <option value="project">Theo dự án cụ thể</option>
+            <option value="all">Toàn bộ dự án</option>
+          </select>
+          {filterMode === 'project' && (
+            <select
+              aria-label="Chọn dự án Dashboard"
+              value={projectFilter}
+              onChange={(event) => setProjectFilter(event.target.value)}
+              className="max-w-64 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Chọn dự án...</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}
+            </select>
+          )}
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-600">
+            <Calendar size={15} className="text-blue-600" />
+            <span>Hôm nay: {new Date().toLocaleDateString('vi-VN')}</span>
+          </div>
         </div>
       </div>
 
@@ -138,7 +187,7 @@ export default function Dashboard() {
           <h3 className="text-2xl font-extrabold text-slate-900 mt-2">{totalTasks}</h3>
           <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
             <FolderKanban size={13} className="text-slate-400" />
-            <span>Trên toàn bộ hệ thống</span>
+            <span>{filterMode === 'personal' ? 'Task được giao cho bạn' : filterMode === 'project' ? 'Trong dự án đã chọn' : 'Trên toàn bộ dự án khả dụng'}</span>
           </p>
         </div>
 

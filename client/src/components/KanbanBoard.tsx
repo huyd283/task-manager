@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult, type DroppableProvided, type DroppableStateSnapshot } from '@hello-pangea/dnd';
 import { api } from '../api/client';
-import { TASK_STATUSES, STATUS_META, type Project, type Task, type TaskStatus } from '../types';
+import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task, type TaskStatus } from '../types';
 import { Plus, Calendar, AlertCircle, MoreHorizontal } from 'lucide-react';
 import TaskModal from '../components/TaskModal';
 import toast from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
 
 export default function KanbanBoard() {
+  const { user } = useAuth();
+  const canViewSystem = user?.role === 'admin' || user?.jobTitle === 'Project Lead';
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<'mine' | 'projects' | 'system'>('projects');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -20,8 +24,12 @@ export default function KanbanBoard() {
     setLoading(true);
     setError('');
     try {
+      const params: Record<string, string | number> = {};
+      if (projectFilter) params.projectId = projectFilter;
+      if (scopeFilter === 'mine' && user) params.assigneeId = user.id;
+      if (scopeFilter === 'projects') params.scope = 'projects';
       const [res, projectResponse] = await Promise.all([
-        api.get('/tasks', { params: projectFilter ? { projectId: projectFilter } : {} }),
+        api.get('/tasks', { params }),
         api.get<{ data: Project[] }>('/projects'),
       ]);
       setTasks(res.data.data);
@@ -32,7 +40,7 @@ export default function KanbanBoard() {
     } finally {
       setLoading(false);
     }
-  }, [projectFilter]);
+  }, [projectFilter, scopeFilter, user]);
 
   useEffect(() => {
     void load();
@@ -65,14 +73,13 @@ export default function KanbanBoard() {
     }
   };
 
-  const isOverdue = (task: Task) =>
-    task.status !== 'DONE' && task.dueDate !== null && task.dueDate < new Date().toISOString().slice(0, 10);
-
   // Style cho từng cột trạng thái
   const columnHeaderStyle: Record<string, { bg: string; text: string; badge: string }> = {
     TODO: { bg: 'bg-slate-100', text: 'text-slate-700', badge: 'bg-slate-200 text-slate-700' },
     IN_PROGRESS: { bg: 'bg-blue-50/70', text: 'text-blue-700', badge: 'bg-blue-200/80 text-blue-800' },
-    IN_REVIEW: { bg: 'bg-amber-50/70', text: 'text-amber-700', badge: 'bg-amber-200/80 text-amber-800' },
+    DEV_DONE: { bg: 'bg-violet-50/70', text: 'text-violet-700', badge: 'bg-violet-200/80 text-violet-800' },
+    TESTING: { bg: 'bg-amber-50/70', text: 'text-amber-700', badge: 'bg-amber-200/80 text-amber-800' },
+    TEST_FAIL: { bg: 'bg-rose-50/70', text: 'text-rose-700', badge: 'bg-rose-200/80 text-rose-800' },
     DONE: { bg: 'bg-emerald-50/70', text: 'text-emerald-700', badge: 'bg-emerald-200/80 text-emerald-800' },
     PENDING: { bg: 'bg-rose-50/70', text: 'text-rose-700', badge: 'bg-rose-200/80 text-rose-800' },
   };
@@ -106,6 +113,29 @@ export default function KanbanBoard() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1" role="group" aria-label="Phạm vi công việc">
+          {([
+            ['mine', 'Task của tôi'],
+            ['projects', 'Task dự án'],
+            ['system', 'Toàn bộ hệ thống'],
+          ] as const).map(([scope, label]) => {
+            const disabled = scope === 'system' && !canViewSystem;
+            return (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => setScopeFilter(scope)}
+                disabled={disabled}
+                title={disabled ? 'Chỉ admin hoặc Project Lead được xem toàn hệ thống.' : undefined}
+                className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                  scopeFilter === scope ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                } ${disabled ? 'cursor-not-allowed opacity-50 hover:text-slate-500' : ''}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
         <label htmlFor="kanban-project-filter" className="text-xs font-bold text-slate-600">Lọc theo dự án</label>
         <select
           id="kanban-project-filter"
@@ -133,7 +163,7 @@ export default function KanbanBoard() {
         </div>
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 items-start overflow-x-auto pb-4">
+          <div className="flex items-start gap-4 overflow-x-auto pb-4">
             {TASK_STATUSES.map((status) => {
               const columnTasks = tasks.filter((t) => t.status === status);
               const headerStyle = columnHeaderStyle[status] || {
@@ -145,14 +175,14 @@ export default function KanbanBoard() {
               return (
                 <div
                   key={status}
-                  className="bg-slate-100/70 rounded-2xl p-3 border border-slate-200/80 flex flex-col max-h-[calc(100vh-220px)] min-w-[260px]"
+                  className="w-[280px] shrink-0 bg-slate-100/70 rounded-2xl p-3 border border-slate-200/80 flex flex-col max-h-[calc(100vh-220px)] min-w-[260px]"
                 >
                   {/* Tên Cột Trạng Thái */}
                   <div className={`flex items-center justify-between p-2.5 rounded-xl mb-3 ${headerStyle.bg}`}>
                     <span className={`text-xs font-bold ${headerStyle.text}`}>
                       {STATUS_META[status]?.label ?? status}
                     </span>
-                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${headerStyle.badge}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${headerStyle?.badge}`}>
                       {columnTasks.length}
                     </span>
                   </div>
@@ -178,7 +208,10 @@ export default function KanbanBoard() {
                                   setEditingTask(task);
                                   setModalOpen(true);
                                 }}
-                                className={`bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none ${
+                                className={`bg-white p-3.5 rounded-xl border shadow-xs hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none ${
+                                  getDeadlineState(task.dueDate, task.status) === 'overdue' ? 'border-rose-300 ring-1 ring-rose-100' :
+                                    getDeadlineState(task.dueDate, task.status) === 'soon' ? 'border-amber-300 ring-1 ring-amber-100' : 'border-slate-200/80'
+                                } ${
                                   snapshot.isDragging ? 'shadow-xl ring-2 ring-blue-500/50 rotate-1 scale-105 z-50' : ''
                                 }`}
                               >
@@ -217,14 +250,23 @@ export default function KanbanBoard() {
 
                                   {/* Due Date */}
                                   {task.dueDate && (
-                                    <div
-                                      className={`flex items-center gap-1 font-semibold ${
-                                        isOverdue(task) ? 'text-rose-600 font-bold' : 'text-slate-400'
-                                      }`}
-                                    >
-                                      <Calendar size={12} />
-                                      <span>{task.dueDate.slice(5)}</span>
-                                    </div>
+                                    (() => {
+                                      const deadlineState = getDeadlineState(task.dueDate, task.status);
+                                      return (
+                                        <div className={`flex items-center gap-1 font-semibold ${
+                                          deadlineState === 'overdue' ? 'text-rose-600 font-bold' :
+                                            deadlineState === 'soon' ? 'text-amber-600 font-bold' : 'text-slate-400'
+                                        }`}>
+                                          <Calendar size={12} />
+                                          <span>{task.dueDate.slice(5)}</span>
+                                          {deadlineState && (
+                                            <span className={`rounded px-1 py-0.5 text-[9px] ${
+                                              deadlineState === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                                            }`}>{deadlineState === 'overdue' ? 'Quá hạn' : 'Sắp hạn'}</span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()
                                   )}
                                 </div>
                               </div>
