@@ -53,8 +53,6 @@ services:
       dockerfile: Dockerfile
     container_name: taskmanager_frontend
     restart: always
-    ports:
-      - "9999:80"               
     depends_on:
       - backend
     networks:
