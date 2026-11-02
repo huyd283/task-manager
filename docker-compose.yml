@@ -63,20 +63,19 @@ services:
 
   # 3. Frontend React + Nginx
   frontend:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: https://api-pm.tomotek.vn
-    container_name: taskmanager_frontend
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:80"
-    depends_on:
-      - backend
-    networks:
-      - taskmanager_net
-
+  build:
+    context: ./client
+    dockerfile: Dockerfile
+    args:
+      VITE_API_URL: https://api-pm.tomotek.vn
+  container_name: taskmanager_frontend
+  restart: unless-stopped
+  ports:
+    - "127.0.0.1:18080:80"
+  depends_on:
+    - backend
+  networks:
+    - taskmanager_net
 volumes:
   mysql_data:
     name: task-manager_mysql_data
