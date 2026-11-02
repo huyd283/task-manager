@@ -33,9 +33,10 @@ services:
       PORT: 5000
       DB_HOST: db                   # Tên service 'db' ở trên
       DB_USER: taskuser
-      DB_PASS: taskpassword_secret
+      DB_PASSWORD: taskpassword_secret
       DB_NAME: task_manager_db
       JWT_SECRET: taskmanager_jwt_secret_key_2026
+      CLIENT_ORIGIN: https://pm.tomotek.vn
       # EMAIL_USER: "your_gmail@gmail.com"
       # EMAIL_PASS: "your_app_password"
     ports:
@@ -51,6 +52,8 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: https://api-pm.tomotek.vn
     container_name: taskmanager_frontend
     restart: always
     depends_on:
