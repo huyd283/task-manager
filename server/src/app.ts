@@ -14,15 +14,15 @@ export function createApp() {
   app.use(cors({ origin: env.clientOrigin, credentials: true }));
   app.use(express.json({ limit: '12mb' }));
 
-  app.get('/api/health', (_req, res) => {
+  app.get(['/api/health', '/health'], (_req, res) => {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
-  app.use('/api/auth', authRoutes);
-  app.use('/api/users', authenticate, userRoutes);
-  app.use('/api/projects', authenticate, projectRoutes);
+  app.use(['/api/auth', '/auth'], authRoutes);
+  app.use(['/api/users', '/users'], authenticate, userRoutes);
+  app.use(['/api/projects', '/projects'], authenticate, projectRoutes);
   // All task endpoints require a valid JWT.
-  app.use('/api/tasks', authenticate, taskRoutes);
+  app.use(['/api/tasks', '/tasks'], authenticate, taskRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

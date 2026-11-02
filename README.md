@@ -110,6 +110,8 @@ npm run dev
 
 ## API
 
+Backend hỗ trợ cả hai dạng đường dẫn: `/api/...` và `...` không có tiền tố `/api` (ví dụ `POST /api/auth/login` hoặc `POST /auth/login`).
+
 Tất cả endpoint của Task yêu cầu header `Authorization: Bearer <token>`.
 
 ### Auth
