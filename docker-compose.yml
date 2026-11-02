@@ -79,7 +79,7 @@ services:
 
 volumes:
   mysql_data:
-    name: taskmanager_mysql_data
+    name: task-manager_mysql_data
 
 networks:
   taskmanager_net:
