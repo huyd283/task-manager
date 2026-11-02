@@ -115,7 +115,8 @@ export async function verifyRegistrationOtp(req: Request, res: Response) {
 }
 
 export async function login(req: Request, res: Response) {
-  const { email, password } = req.body ?? {};
+  const email = normalizeEmail(req.body?.email);
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
   if (!email || !password) {
     throw new HttpError(400, 'email and password are required');
@@ -123,7 +124,7 @@ export async function login(req: Request, res: Response) {
 
   const user = await findUserByEmail(email);
   if (!user) {
-    throw new HttpError(401, 'Invalid credentials');
+    throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
   }
   if (!user.is_active) {
     throw new HttpError(403, 'This account is inactive');
@@ -131,7 +132,7 @@ export async function login(req: Request, res: Response) {
 
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) {
-    throw new HttpError(401, 'Invalid credentials');
+    throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
   }
 
   const token = signToken({ id: user.id, email: user.email });
