@@ -1,11 +1,10 @@
-version: '3.8'
 
 services:
   # 1. Database MySQL
   db:
     image: mysql:8.0
     container_name: taskmanager_db
-    restart: always
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword_secret
       MYSQL_DATABASE: task_manager_db
@@ -13,41 +12,56 @@ services:
       MYSQL_PASSWORD: taskpassword_secret
     volumes:
       - mysql_data:/var/lib/mysql
-      # - ./server/src/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 5s
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ptaskpassword_secret"]
+      interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
     networks:
       - taskmanager_net
 
-  # 2. Backend API (Node.js/Express)
+  # 2. Backend API
   backend:
     build:
       context: ./server
       dockerfile: Dockerfile
     container_name: taskmanager_backend
-    restart: always
+    restart: unless-stopped
     environment:
+      NODE_ENV: production
       PORT: 5000
-      DB_HOST: db                   # Tên service 'db' ở trên
+
+      DB_HOST: db
+      DB_PORT: 3306
       DB_USER: taskuser
       DB_PASSWORD: taskpassword_secret
       DB_NAME: task_manager_db
+
       JWT_SECRET: taskmanager_jwt_secret_key_2026
       CLIENT_ORIGIN: https://pm.tomotek.vn
-      # EMAIL_USER: "your_gmail@gmail.com"
-      # EMAIL_PASS: "your_app_password"
+
+      # EMAIL_USER: ""
+      # EMAIL_PASS: ""
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5000').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - taskmanager_net
 
-  # 3. Frontend Web (React + Nginx)
+  # 3. Frontend React + Nginx
   frontend:
     build:
       context: ./client
@@ -55,7 +69,9 @@ services:
       args:
         VITE_API_URL: https://api-pm.tomotek.vn
     container_name: taskmanager_frontend
-    restart: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
     depends_on:
       - backend
     networks:
@@ -63,6 +79,7 @@ services:
 
 volumes:
   mysql_data:
+    name: taskmanager_mysql_data
 
 networks:
   taskmanager_net:
