@@ -5,6 +5,8 @@ services:
     image: mysql:8.0
     container_name: taskmanager_db
     restart: unless-stopped
+    ports:
+      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword_secret
       MYSQL_DATABASE: task_manager_db
