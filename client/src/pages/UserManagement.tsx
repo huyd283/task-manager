@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import type { ManagedUser } from '../types';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ModalPortal from '../components/common/ModalPortal';
 
 const JOB_TITLES = ['Project Lead', 'Developer', 'Tester', 'Designer'] as const;
 const DEPARTMENTS = [
@@ -424,6 +425,7 @@ export default function UserManagement() {
       </section>
 
       {isModalOpen && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm animate-in fade-in duration-200" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="user-modal-title" className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             <div className="relative flex items-center justify-between border-b border-slate-100 px-6 py-4">
@@ -479,6 +481,7 @@ export default function UserManagement() {
             </div>
           </section>
         </div>
+        </ModalPortal>
       )}
 
       <ConfirmModal

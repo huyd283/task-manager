@@ -54,6 +54,13 @@ export default function Layout() {
     navigate("/login");
   };
 
+  const roleLabel =
+    user?.role === "admin"
+      ? "Quản trị hệ thống"
+      : user?.role === "member"
+        ? "Thành viên"
+        : "Chưa xác định";
+
   // Class style chung cho Menu Link Chính
   const navItemClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 ${
@@ -109,10 +116,10 @@ export default function Layout() {
               </div>
               <div className="text-left hidden md:block">
                 <span className="text-xs font-bold text-slate-800 block leading-tight">
-                  {user?.name || "Nguyen Van An"}
+                  {user?.name || "Tài khoản"}
                 </span>
-                <span className="text-[10px] text-slate-400 font-medium block">
-                  Quản lý dự án
+                <span className="block text-[10px] font-medium text-slate-400">
+                  {roleLabel}
                 </span>
               </div>
               <ChevronDown
@@ -125,13 +132,16 @@ export default function Layout() {
 
             {/* Menu Dropdown khi click User */}
             {isUserDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl shadow-lg border border-slate-200/80 py-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200/80 bg-white py-1.5 shadow-lg animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-4 py-2 border-b border-slate-100">
                   <p className="text-xs font-bold text-slate-800">
-                    {user?.name || "Nguyen Van An"}
+                    {user?.name || "Tài khoản"}
                   </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    admin@techadmin.com
+                  <p className="mt-0.5 break-all text-[10px] text-slate-400">
+                    {user?.email || "Chưa có email"}
+                  </p>
+                  <p className="mt-1 text-[10px] font-medium text-slate-500">
+                    {roleLabel}
                   </p>
                 </div>
 

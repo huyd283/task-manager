@@ -14,7 +14,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '../types';
-import { Plus, Filter, Edit3, Trash2, Calendar, Folder, UserCheck, AlertCircle } from 'lucide-react';
+import { Plus, Filter, Edit3, Trash2, Calendar, Folder, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 
@@ -221,17 +221,27 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
       {/* 2. Bảng Dữ liệu */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[1325px] table-fixed border-collapse text-left">
+            <colgroup>
+              <col className="w-[95px]" />
+              <col className="w-[300px]" />
+              <col className="w-[175px]" />
+              <col className="w-[185px]" />
+              <col className="w-[110px]" />
+              <col className="w-[155px]" />
+              <col className="w-[215px]" />
+              <col className="w-[90px]" />
+            </colgroup>
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                <th className="py-3.5 px-4 w-24">Mã</th>
-                <th className="py-3.5 px-4 min-w-[220px]">Tiêu đề</th>
-                <th className="py-3.5 px-4">Dự án</th>
-                <th className="py-3.5 px-4">Phụ trách</th>
-                <th className="py-3.5 px-4">Ưu tiên</th>
-                <th className="py-3.5 px-4">Trạng thái</th>
-                <th className="py-3.5 px-4">Hạn chót</th>
-                <th className="py-3.5 px-4 text-right">Thao tác</th>
+              <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <th className="whitespace-nowrap px-3 py-3.5">Mã</th>
+                <th className="px-4 py-3.5">Tiêu đề</th>
+                <th className="px-3 py-3.5">Dự án</th>
+                <th className="px-3 py-3.5">Phụ trách</th>
+                <th className="px-3 py-3.5">Ưu tiên</th>
+                <th className="px-3 py-3.5">Trạng thái</th>
+                <th className="whitespace-nowrap px-3 py-3.5">Hạn chót</th>
+                <th className="whitespace-nowrap px-3 py-3.5 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -254,35 +264,36 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                 visibleTasks.map((task) => {
                   const deadlineState = getDeadlineState(task.dueDate, task.status);
                   return (
-                  <tr key={task.id} className={`hover:bg-blue-50/30 transition-colors group ${
+                  <tr key={task.id} onClick={() => openEdit(task)} className={`group transition-colors hover:bg-blue-50/30 ${
                     deadlineState === 'overdue' ? 'bg-rose-50/40' : deadlineState === 'soon' ? 'bg-amber-50/40' : ''
                   }`}>
                     {/* Mã Task */}
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-500">
-                      <span className="bg-slate-100 group-hover:bg-blue-100/60 group-hover:text-blue-700 px-2 py-0.5 rounded transition-colors">
+                    <td className="whitespace-nowrap px-3 py-3.5 align-middle font-mono font-bold text-slate-500">
+                      <span className="rounded bg-slate-100 px-2 py-1 transition-colors group-hover:bg-blue-100/60 group-hover:text-blue-700">
                         {task.taskCode}
                       </span>
                     </td>
 
                     {/* Tiêu đề */}
-                    <td className="py-3.5 px-4">
+                    <td className="overflow-hidden px-4 py-3.5 align-middle">
                       <div
                         onClick={() => openEdit(task)}
-                        className="font-bold text-slate-800 hover:text-blue-600 cursor-pointer transition-colors"
+                        title={task.title}
+                        className="truncate font-bold text-slate-800 transition-colors hover:cursor-pointer hover:text-blue-600"
                       >
                         {task.title}
                       </div>
                       {task.description && (
-                        <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">{task.description}</div>
+                        <div title={task.description} className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{task.description}</div>
                       )}
                     </td>
 
                     {/* Dự án */}
-                    <td className="py-3.5 px-4 font-semibold text-slate-600">
+                    <td className="overflow-hidden px-3 py-3.5 align-middle font-semibold text-slate-600">
                       {task.project ? (
-                        <span className="inline-flex items-center gap-1.5 text-slate-700">
-                          <Folder size={13} className="text-indigo-500" />
-                          {task.project}
+                        <span className="flex min-w-0 items-center gap-1.5 text-slate-700" title={task.project}>
+                          <Folder size={13} className="shrink-0 text-indigo-500" />
+                          <span className="truncate">{task.project}</span>
                         </span>
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -290,13 +301,13 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                     </td>
 
                     {/* Phụ trách */}
-                    <td className="py-3.5 px-4">
-                      {task.assignee ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-400 text-white text-[10px] font-black flex items-center justify-center shadow-sm">
-                            {task.assignee.charAt(0).toUpperCase()}
+                    <td className="overflow-hidden px-3 py-3.5 align-middle">
+                      {task.assignee || task.assignees?.length ? (
+                        <div className="flex min-w-0 items-center gap-2" title={(task.assignees?.length ? task.assignees : [task.assignee]).join(', ')}>
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-amber-400 to-orange-400 text-[10px] font-black text-white shadow-sm">
+                            {(task.assignees?.[0] ?? task.assignee ?? '').charAt(0).toUpperCase()}
                           </div>
-                          <span className="font-semibold text-slate-700">{task.assignee}</span>
+                          <span className="truncate font-semibold text-slate-700">{(task.assignees?.length ? task.assignees : [task.assignee]).join(', ')}</span>
                         </div>
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -304,19 +315,19 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                     </td>
 
                     {/* Mức độ ưu tiên */}
-                    <td className="py-3.5 px-4">
-                      <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${PRIORITY_META[getTaskPriority(task.priority)].badge}`}>
+                    <td className="px-3 py-3.5 align-middle">
+                      <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-bold ${PRIORITY_META[getTaskPriority(task.priority)].badge}`}>
                         {PRIORITY_META[getTaskPriority(task.priority)].label}
                       </span>
                     </td>
 
                     {/* Trạng thái Select */}
-                    <td className="py-3.5 px-4">
-                      <div className="relative inline-block">
+                    <td className="px-3 py-3.5 align-middle">
+                      <div className="relative block">
                         <select
                           value={task.status}
                           onChange={(e) => changeStatus(task, e.target.value as TaskStatus)}
-                          className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm transition-all"
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-bold text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-100 focus:ring-2 focus:ring-blue-500"
                         >
                           {TASK_STATUSES.map((s) => (
                             <option key={s} value={s}>
@@ -328,14 +339,14 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                     </td>
 
                     {/* Hạn chót */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-1.5">
+                    <td className="px-3 py-3.5 align-middle">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <Calendar
                           size={13}
-                          className={deadlineState === 'overdue' ? 'text-rose-500 animate-bounce' : deadlineState === 'soon' ? 'text-amber-500' : 'text-slate-400'}
+                          className={`shrink-0 ${deadlineState === 'overdue' ? 'text-rose-500 animate-bounce' : deadlineState === 'soon' ? 'text-amber-500' : 'text-slate-400'}`}
                         />
                         <span
-                          className={`font-semibold ${
+                          className={`whitespace-nowrap font-semibold ${
                             deadlineState === 'overdue'
                               ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200/60'
                               : deadlineState === 'soon'
@@ -346,7 +357,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                           {task.dueDate ?? '—'}
                         </span>
                         {deadlineState && (
-                          <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
+                          <span className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
                             deadlineState === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
                           }`}>
                             {deadlineState === 'overdue' ? 'Quá hạn' : 'Sắp hết hạn'}
@@ -356,7 +367,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                     </td>
 
                     {/* Thao tác */}
-                    <td className="py-3.5 px-4 text-right">
+                    <td className="px-3 py-3.5 align-middle text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => openEdit(task)}

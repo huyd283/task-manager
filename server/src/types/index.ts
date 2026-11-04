@@ -24,6 +24,8 @@ export interface Task {
   priority: TaskPriority;
   assigneeId: number | null;
   assignee: string | null;
+  assigneeIds: number[];
+  assignees: string[];
   startDate: string | null;
   estimatedDate: string | null;
   dueDate: string | null;
@@ -60,6 +62,7 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   assigneeId?: number | null;
+  assigneeIds?: number[];
   startDate?: string | null;
   estimatedDate?: string | null;
   dueDate?: string | null;

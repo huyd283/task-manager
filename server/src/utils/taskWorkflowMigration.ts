@@ -81,6 +81,20 @@ export async function migrateTaskWorkflow(): Promise<void> {
         CONSTRAINT fk_task_attachments_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
     );
+    await connection.query(
+      `CREATE TABLE IF NOT EXISTS task_assignees (
+        task_id INT NOT NULL,
+        user_id INT NOT NULL,
+        PRIMARY KEY (task_id, user_id),
+        INDEX idx_task_assignees_user (user_id),
+        CONSTRAINT fk_task_assignees_task FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT fk_task_assignees_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    );
+    await connection.query(
+      `INSERT IGNORE INTO task_assignees (task_id, user_id)
+       SELECT id, assignee_user_id FROM tasks WHERE assignee_user_id IS NOT NULL`,
+    );
   } finally {
     await connection.end();
   }

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult, type DroppableProvided, type DroppableStateSnapshot } from '@hello-pangea/dnd';
 import { api } from '../api/client';
 import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task, type TaskStatus } from '../types';
-import { Plus, Calendar, AlertCircle, MoreHorizontal } from 'lucide-react';
+import { Plus, Calendar, AlertCircle } from 'lucide-react';
 import TaskModal from '../components/TaskModal';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -10,14 +10,48 @@ import { useAuth } from '../context/AuthContext';
 export default function KanbanBoard() {
   const { user } = useAuth();
   const canViewSystem = user?.role === 'admin' || user?.jobTitle === 'Project Lead';
+  const isAdmin = user?.role === 'admin';
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
   const [scopeFilter, setScopeFilter] = useState<'mine' | 'projects' | 'system'>('projects');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dragging, setDragging] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const effectiveScope = isAdmin ? 'system' : scopeFilter;
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const scrollAtPointer = (clientX: number) => {
+      const board = boardRef.current;
+      if (!board) return;
+      const bounds = board.getBoundingClientRect();
+      const edgeSize = 72;
+      if (clientX < bounds.left + edgeSize && board.scrollLeft > 0) {
+        const distance = Math.min(1, (bounds.left + edgeSize - clientX) / edgeSize);
+        board.scrollLeft -= Math.ceil(distance * 24);
+      } else if (clientX > bounds.right - edgeSize && board.scrollLeft < board.scrollWidth - board.clientWidth) {
+        const distance = Math.min(1, (clientX - (bounds.right - edgeSize)) / edgeSize);
+        board.scrollLeft += Math.ceil(distance * 24);
+      }
+    };
+    const handleMouseMove = (event: MouseEvent) => scrollAtPointer(event.clientX);
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (touch) scrollAtPointer(touch.clientX);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [dragging]);
 
   // Tải danh sách công việc
   const load = useCallback(async () => {
@@ -26,8 +60,8 @@ export default function KanbanBoard() {
     try {
       const params: Record<string, string | number> = {};
       if (projectFilter) params.projectId = projectFilter;
-      if (scopeFilter === 'mine' && user) params.assigneeId = user.id;
-      if (scopeFilter === 'projects') params.scope = 'projects';
+      if (effectiveScope === 'mine' && user) params.assigneeId = user.id;
+      if (effectiveScope === 'projects') params.scope = 'projects';
       const [res, projectResponse] = await Promise.all([
         api.get('/tasks', { params }),
         api.get<{ data: Project[] }>('/projects'),
@@ -40,7 +74,7 @@ export default function KanbanBoard() {
     } finally {
       setLoading(false);
     }
-  }, [projectFilter, scopeFilter, user]);
+  }, [effectiveScope, projectFilter, user]);
 
   useEffect(() => {
     void load();
@@ -48,6 +82,7 @@ export default function KanbanBoard() {
 
   // Xử lý sự kiện Kéo & Thả (Drag & Drop)
   const onDragEnd = async (result: DropResult) => {
+    setDragging(false);
     const { destination, source, draggableId } = result;
 
     // Không kéo thả vào đâu hoặc thả lại đúng vị trí cũ
@@ -83,6 +118,13 @@ export default function KanbanBoard() {
     DONE: { bg: 'bg-emerald-50/70', text: 'text-emerald-700', badge: 'bg-emerald-200/80 text-emerald-800' },
     PENDING: { bg: 'bg-rose-50/70', text: 'text-rose-700', badge: 'bg-rose-200/80 text-rose-800' },
   };
+  const scopeOptions = isAdmin
+    ? [['system', 'Toàn bộ hệ thống']] as const
+    : [
+      ['mine', 'Task của tôi'],
+      ['projects', 'Task dự án'],
+      ...(canViewSystem ? [['system', 'Toàn bộ hệ thống'] as const] : []),
+    ] as const;
 
   return (
     <div className="space-y-6">
@@ -114,27 +156,18 @@ export default function KanbanBoard() {
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
         <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1" role="group" aria-label="Phạm vi công việc">
-          {([
-            ['mine', 'Task của tôi'],
-            ['projects', 'Task dự án'],
-            ['system', 'Toàn bộ hệ thống'],
-          ] as const).map(([scope, label]) => {
-            const disabled = scope === 'system' && !canViewSystem;
-            return (
+          {scopeOptions.map(([scope, label]) => (
               <button
                 key={scope}
                 type="button"
                 onClick={() => setScopeFilter(scope)}
-                disabled={disabled}
-                title={disabled ? 'Chỉ admin hoặc Project Lead được xem toàn hệ thống.' : undefined}
                 className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
-                  scopeFilter === scope ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                } ${disabled ? 'cursor-not-allowed opacity-50 hover:text-slate-500' : ''}`}
+                  effectiveScope === scope ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
                 {label}
               </button>
-            );
-          })}
+          ))}
         </div>
         <label htmlFor="kanban-project-filter" className="text-xs font-bold text-slate-600">Lọc theo dự án</label>
         <select
@@ -162,8 +195,11 @@ export default function KanbanBoard() {
           <span>Đang tải bảng công việc...</span>
         </div>
       ) : (
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex items-start gap-4 overflow-x-auto pb-4">
+        <DragDropContext onDragStart={() => setDragging(true)} onDragEnd={onDragEnd}>
+          <div
+            ref={boardRef}
+            className="flex items-start gap-4 overflow-x-auto overscroll-x-contain pb-4"
+          >
             {TASK_STATUSES.map((status) => {
               const columnTasks = tasks.filter((t) => t.status === status);
               const headerStyle = columnHeaderStyle[status] || {
@@ -233,20 +269,24 @@ export default function KanbanBoard() {
                                 </h4>
 
                                 {/* Phụ trách & Hạn chót */}
-                                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
-                                  {/* User Avatar */}
-                                  {task.assignee ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-400 to-orange-400 text-white text-[9px] font-black flex items-center justify-center">
-                                        {task.assignee.charAt(0).toUpperCase()}
+                                <div className="flex items-start justify-between gap-2 border-t border-slate-100 pt-2 text-[11px]">
+                                  {(() => {
+                                    const assignees = task.assignees?.length
+                                      ? task.assignees
+                                      : task.assignee ? [task.assignee] : [];
+                                    return assignees.length > 0 ? (
+                                      <div className="flex min-w-0 flex-1 items-start gap-1.5" title={assignees.join(', ')}>
+                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-amber-400 to-orange-400 text-[9px] font-black text-white">
+                                          {assignees[0].charAt(0).toUpperCase()}
+                                        </div>
+                                        <span className="min-w-0 whitespace-normal break-words font-semibold leading-4 text-slate-600">
+                                          {assignees.join(', ')}
+                                        </span>
                                       </div>
-                                      <span className="font-semibold text-slate-600 truncate max-w-[80px]">
-                                        {task.assignee}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-300">—</span>
-                                  )}
+                                    ) : (
+                                      <span className="text-slate-300">—</span>
+                                    );
+                                  })()}
 
                                   {/* Due Date */}
                                   {task.dueDate && (

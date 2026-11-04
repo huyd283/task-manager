@@ -27,14 +27,20 @@ function assertPriority(priority: unknown): TaskPriority {
   return priority as TaskPriority;
 }
 
-function parseAssigneeId(value: unknown, isPresent: boolean): number | null | undefined {
+function parseAssigneeIds(body: Record<string, unknown>, isPresent: boolean): number[] | undefined {
   if (!isPresent) return undefined;
-  if (value === null || value === '') return null;
-  const id = typeof value === 'number' ? value : Number.NaN;
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new HttpError(400, 'assigneeId must be a positive user id or null');
+  if (Object.hasOwn(body, 'assigneeIds')) {
+    if (!Array.isArray(body.assigneeIds) || body.assigneeIds.some((id) => !Number.isInteger(id) || Number(id) <= 0)) {
+      throw new HttpError(400, 'assigneeIds must contain positive user ids');
+    }
+    return [...new Set(body.assigneeIds as number[])];
   }
-  return id;
+  if (body.assigneeId === null || body.assigneeId === '') return [];
+  const id = body.assigneeId;
+  if (!Number.isInteger(id) || Number(id) <= 0) {
+    throw new HttpError(400, 'assigneeIds must be an array of positive user ids');
+  }
+  return [Number(id)];
 }
 
 function canManageProjects(req: Request) {
@@ -54,9 +60,15 @@ async function assertTaskAccess(req: Request, task: Task) {
   }
 }
 
-async function assertAssigneeIsActive(id: number | null | undefined) {
-  if (id !== undefined && id !== null && !(await userRepo.isAssignableUser(id))) {
-    throw new HttpError(400, 'Assignee must be an active user in the system');
+async function assertAssigneesAreActive(ids: number[] | undefined, projectId: number) {
+  if (!ids) return;
+  for (const id of ids) {
+    if (!(await userRepo.isAssignableUser(id))) {
+      throw new HttpError(400, 'All assignees must be active users in the system');
+    }
+    if (!(await projectRepo.isProjectMember(projectId, id))) {
+      throw new HttpError(400, 'All assignees must be members of the selected project');
+    }
   }
 }
 
@@ -102,11 +114,8 @@ export async function create(req: Request, res: Response) {
   await assertProjectAccess(req, projectId);
   if (body.status !== undefined) assertStatus(body.status);
   if (body.priority !== undefined) assertPriority(body.priority);
-  const assigneeId = parseAssigneeId(body.assigneeId, Object.hasOwn(body, 'assigneeId')) ?? null;
-  await assertAssigneeIsActive(assigneeId);
-  if (assigneeId !== null && !(await projectRepo.isProjectMember(projectId, assigneeId))) {
-    throw new HttpError(400, 'Assignee must be a member of the selected project');
-  }
+  const assigneeIds = parseAssigneeIds(body, Object.hasOwn(body, 'assigneeIds') || Object.hasOwn(body, 'assigneeId')) ?? [];
+  await assertAssigneesAreActive(assigneeIds, projectId);
 
   let taskCode = typeof body.taskCode === 'string' && body.taskCode.trim()
     ? body.taskCode.trim()
@@ -119,7 +128,7 @@ export async function create(req: Request, res: Response) {
   }
 
   const task = await taskRepo.createTask(
-    { ...body, projectId, assigneeId, taskCode } as Parameters<typeof taskRepo.createTask>[0],
+    { ...body, projectId, assigneeIds, assigneeId: assigneeIds[0] ?? null, taskCode } as Parameters<typeof taskRepo.createTask>[0],
     req.user!.id,
   );
   res.status(201).json({ data: task });
@@ -150,10 +159,12 @@ export async function update(req: Request, res: Response) {
   await assertProjectAccess(req, targetProjectId);
   if (body.status !== undefined) assertStatus(body.status);
   if (body.priority !== undefined) assertPriority(body.priority);
-  const assigneeId = parseAssigneeId(body.assigneeId, Object.hasOwn(body, 'assigneeId'));
-  await assertAssigneeIsActive(assigneeId);
-  if (assigneeId !== undefined && assigneeId !== null && !(await projectRepo.isProjectMember(targetProjectId, assigneeId))) {
-    throw new HttpError(400, 'Assignee must be a member of the selected project');
+  const hasAssignees = Object.hasOwn(body, 'assigneeIds') || Object.hasOwn(body, 'assigneeId');
+  const assigneeIds = parseAssigneeIds(body, hasAssignees);
+  await assertAssigneesAreActive(assigneeIds, targetProjectId);
+  if (assigneeIds !== undefined) {
+    body.assigneeIds = assigneeIds;
+    delete body.assigneeId;
   }
 
   // Required columns must not be blanked out.

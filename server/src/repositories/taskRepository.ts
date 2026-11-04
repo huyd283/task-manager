@@ -13,6 +13,8 @@ interface TaskRow extends RowDataPacket {
   priority: TaskPriority;
   assignee_user_id: number | null;
   assignee: string | null;
+  assignee_ids: string | null;
+  assignees: string | null;
   start_date: string | null;
   estimated_date: string | null;
   due_date: string | null;
@@ -34,6 +36,8 @@ function mapRow(row: TaskRow): Task {
     priority: row.priority ?? 'MEDIUM',
     assigneeId: row.assignee_user_id,
     assignee: row.assignee,
+    assigneeIds: row.assignee_ids ? row.assignee_ids.split(',').map(Number) : row.assignee_user_id === null ? [] : [row.assignee_user_id],
+    assignees: row.assignees ? row.assignees.split('\n') : row.assignee ? [row.assignee] : [],
     startDate: row.start_date,
     estimatedDate: row.estimated_date,
     dueDate: row.due_date,
@@ -51,12 +55,23 @@ const COLUMN_MAP: Record<string, string> = {
   description: 'description',
   status: 'status',
   priority: 'priority',
-  assigneeId: 'assignee_user_id',
   startDate: 'start_date',
   estimatedDate: 'estimated_date',
   dueDate: 'due_date',
   actualDate: 'actual_date',
 };
+
+const TASK_SELECT = `SELECT tasks.*, projects.name AS project,
+       COALESCE(primary_assignee.name, tasks.assignee) AS assignee,
+       (SELECT GROUP_CONCAT(ta.user_id ORDER BY ta.user_id SEPARATOR ',')
+        FROM task_assignees ta WHERE ta.task_id = tasks.id) AS assignee_ids,
+       (SELECT GROUP_CONCAT(assigned_user.name ORDER BY assigned_user.name SEPARATOR '\\n')
+        FROM task_assignees ta
+        JOIN users assigned_user ON assigned_user.id = ta.user_id
+        WHERE ta.task_id = tasks.id) AS assignees
+     FROM tasks
+     LEFT JOIN users primary_assignee ON primary_assignee.id = tasks.assignee_user_id
+     INNER JOIN projects ON projects.id = tasks.project_id`;
 
 export interface TaskFilter {
   status?: TaskStatus;
@@ -75,8 +90,8 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
     params.push(filter.status);
   }
   if (filter.assigneeId) {
-    clauses.push('tasks.assignee_user_id = ?');
-    params.push(filter.assigneeId);
+    clauses.push('(tasks.assignee_user_id = ? OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = tasks.id AND ta.user_id = ?))');
+    params.push(filter.assigneeId, filter.assigneeId);
   }
   if (filter.priority) {
     clauses.push('tasks.priority = ?');
@@ -93,10 +108,7 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const [rows] = await pool.query<TaskRow[]>(
-    `SELECT tasks.*, projects.name AS project, COALESCE(users.name, tasks.assignee) AS assignee
-     FROM tasks
-     LEFT JOIN users ON users.id = tasks.assignee_user_id
-     INNER JOIN projects ON projects.id = tasks.project_id
+    `${TASK_SELECT}
     ${where}
      ORDER BY tasks.id DESC`,
     params,
@@ -106,10 +118,7 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
 
 export async function getTaskById(id: number): Promise<Task | null> {
   const [rows] = await pool.query<TaskRow[]>(
-    `SELECT tasks.*, projects.name AS project, COALESCE(users.name, tasks.assignee) AS assignee
-     FROM tasks LEFT JOIN users ON users.id = tasks.assignee_user_id
-     INNER JOIN projects ON projects.id = tasks.project_id
-     WHERE tasks.id = ? LIMIT 1`,
+    `${TASK_SELECT} WHERE tasks.id = ? LIMIT 1`,
     [id],
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -117,10 +126,7 @@ export async function getTaskById(id: number): Promise<Task | null> {
 
 export async function getTaskByCode(code: string): Promise<Task | null> {
   const [rows] = await pool.query<TaskRow[]>(
-    `SELECT tasks.*, projects.name AS project, COALESCE(users.name, tasks.assignee) AS assignee
-     FROM tasks LEFT JOIN users ON users.id = tasks.assignee_user_id
-     INNER JOIN projects ON projects.id = tasks.project_id
-     WHERE tasks.task_code = ? LIMIT 1`,
+    `${TASK_SELECT} WHERE tasks.task_code = ? LIMIT 1`,
     [code],
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -143,6 +149,8 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    const assigneeIds = input.assigneeIds ?? (input.assigneeId === null || input.assigneeId === undefined ? [] : [input.assigneeId]);
+    const primaryAssigneeId = assigneeIds[0] ?? null;
     const [result] = await connection.query<ResultSetHeader>(
       `INSERT INTO tasks
          (task_code, project_id, project, title, description, status, priority, assignee_user_id, assignee,
@@ -156,14 +164,20 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
         input.description ?? null,
         input.status ?? 'TODO',
         input.priority ?? 'MEDIUM',
-        input.assigneeId ?? null,
-        input.assigneeId ?? null,
+        primaryAssigneeId,
+        primaryAssigneeId,
         input.startDate ?? null,
         input.estimatedDate ?? null,
         input.dueDate ?? null,
         input.actualDate ?? null,
       ],
     );
+    if (assigneeIds.length > 0) {
+      await connection.query(
+        `INSERT INTO task_assignees (task_id, user_id) VALUES ${assigneeIds.map(() => '(?, ?)').join(',')}`,
+        assigneeIds.flatMap((assigneeId) => [result.insertId, assigneeId]),
+      );
+    }
     await connection.query(
       'INSERT INTO task_history (task_id, user_id, action_type, new_value) VALUES (?, ?, ?, ?)',
       [result.insertId, userId, 'created', `${input.taskCode}: ${input.title}`],
@@ -208,29 +222,9 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
     const sets: string[] = [];
     const params: unknown[] = [];
     for (const [key, column] of Object.entries(COLUMN_MAP)) {
-      if (key === 'startDate' || !(key in input)) continue;
+      if (key === 'startDate' || key === 'assigneeId' || !(key in input)) continue;
       const newValue = (input as Record<string, unknown>)[key] ?? null;
       let oldValue: unknown = current[column];
-
-      if (key === 'assigneeId') {
-        oldValue = current.assignee;
-        let newName: string | null = null;
-        if (newValue !== null) {
-          const [assignees] = await connection.query<Array<RowDataPacket & { name: string }>>(
-            'SELECT name FROM users WHERE id = ?',
-            [newValue],
-          );
-          newName = assignees[0]?.name ?? null;
-        }
-        if (String(current.assignee_user_id ?? '') !== String(newValue ?? '')) {
-          changes.push({ action: key, oldValue: oldValue == null ? null : String(oldValue), newValue: newName });
-        }
-        sets.push(`${column} = ?`);
-        params.push(newValue);
-        sets.push('assignee = (SELECT name FROM users WHERE id = ?)');
-        params.push(newValue);
-        continue;
-      }
 
       if (key === 'projectId') {
         oldValue = current.project;
@@ -258,6 +252,48 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
       }
       sets.push(`${column} = ?`);
       params.push(newValue);
+    }
+
+    const requestedAssigneeIds = input.assigneeIds ??
+      (input.assigneeId === undefined ? undefined : input.assigneeId === null ? [] : [input.assigneeId]);
+    if (requestedAssigneeIds !== undefined) {
+      const assigneeIds = [...new Set(requestedAssigneeIds)];
+      const [oldAssigneeRows] = await connection.query<Array<RowDataPacket & { name: string }>>(
+        `SELECT u.name FROM task_assignees ta JOIN users u ON u.id = ta.user_id
+         WHERE ta.task_id = ? ORDER BY u.name`,
+        [id],
+      );
+      const oldNames = oldAssigneeRows.length > 0
+        ? oldAssigneeRows.map((row) => row.name)
+        : current.assignee ? [String(current.assignee)] : [];
+      let newAssigneeRows: Array<RowDataPacket & { id: number; name: string }> = [];
+      if (assigneeIds.length > 0) {
+        const [rows] = await connection.query<Array<RowDataPacket & { id: number; name: string }>>(
+          `SELECT id, name FROM users WHERE id IN (${assigneeIds.map(() => '?').join(',')}) ORDER BY name`,
+          assigneeIds,
+        );
+        newAssigneeRows = rows;
+      }
+      const namesById = new Map(newAssigneeRows.map((row) => [Number(row.id), row.name]));
+      const newNames = assigneeIds.map((assigneeId) => namesById.get(assigneeId)).filter((name): name is string => Boolean(name));
+      if (JSON.stringify([...oldNames].sort()) !== JSON.stringify([...newNames].sort())) {
+        changes.push({
+          action: 'assigneeIds',
+          oldValue: oldNames.length > 0 ? oldNames.join(', ') : null,
+          newValue: newNames.length > 0 ? newNames.join(', ') : null,
+        });
+      }
+
+      await connection.query('DELETE FROM task_assignees WHERE task_id = ?', [id]);
+      if (assigneeIds.length > 0) {
+        await connection.query(
+          `INSERT INTO task_assignees (task_id, user_id) VALUES ${assigneeIds.map(() => '(?, ?)').join(',')}`,
+          assigneeIds.flatMap((assigneeId) => [id, assigneeId]),
+        );
+      }
+      const primaryAssigneeId = assigneeIds[0] ?? null;
+      sets.push('assignee_user_id = ?', 'assignee = ?');
+      params.push(primaryAssigneeId, primaryAssigneeId === null ? null : namesById.get(primaryAssigneeId) ?? null);
     }
 
     if (input.status === 'DONE' && current.actual_date == null && !('actualDate' in input)) {
@@ -394,20 +430,21 @@ export async function getStatsByAssignee(userId?: number): Promise<AssigneeStat[
     : '';
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT
-      COALESCE(users.name, tasks.assignee, 'Unassigned') AS assignee,
-       COUNT(*)                                                                   AS total,
-       SUM(status = 'TODO')                                                       AS todo,
-       SUM(status = 'IN_PROGRESS')                                                AS inProgress,
-       SUM(status = 'DEV_DONE')                                                   AS devDone,
-       SUM(status = 'TESTING')                                                    AS testing,
-       SUM(status = 'TEST_FAIL')                                                  AS testFail,
-       SUM(status = 'DONE')                                                       AS done,
-       SUM(status = 'PENDING')                                                    AS pending,
-       SUM(status <> 'DONE' AND due_date IS NOT NULL AND due_date < CURDATE())    AS overdue
+      COALESCE(assigned_user.name, tasks.assignee, 'Unassigned') AS assignee,
+       COUNT(DISTINCT tasks.id) AS total,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'TODO' THEN tasks.id END) AS todo,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'IN_PROGRESS' THEN tasks.id END) AS inProgress,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'DEV_DONE' THEN tasks.id END) AS devDone,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'TESTING' THEN tasks.id END) AS testing,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'TEST_FAIL' THEN tasks.id END) AS testFail,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'DONE' THEN tasks.id END) AS done,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'PENDING' THEN tasks.id END) AS pending,
+       COUNT(DISTINCT CASE WHEN tasks.status <> 'DONE' AND tasks.due_date IS NOT NULL AND tasks.due_date < CURDATE() THEN tasks.id END) AS overdue
     FROM tasks
-    LEFT JOIN users ON users.id = tasks.assignee_user_id
+    LEFT JOIN task_assignees ta ON ta.task_id = tasks.id
+    LEFT JOIN users assigned_user ON assigned_user.id = COALESCE(ta.user_id, tasks.assignee_user_id)
     ${visibility}
-    GROUP BY COALESCE(users.name, tasks.assignee, 'Unassigned')
+    GROUP BY COALESCE(assigned_user.name, tasks.assignee, 'Unassigned')
      ORDER BY total DESC`,
     userId ? [userId] : [],
   );

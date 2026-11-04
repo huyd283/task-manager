@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import type { AssignableUser, Project, ProjectStatus } from '../types';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ModalPortal from '../components/common/ModalPortal';
 
 const STATUSES: Array<{ value: ProjectStatus; label: string; style: string }> = [
   { value: 'PLANNING', label: 'Lên kế hoạch', style: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -118,6 +119,14 @@ export default function ProjectManagement() {
 
   const runningCount = projects.filter((project) => project.status === 'ACTIVE').length;
   const memberCount = new Set(projects.flatMap((project) => project.members.map((member) => member.id))).size;
+  const toggleMember = (memberId: string, checked: boolean) => {
+    setForm((current) => ({
+      ...current,
+      memberIds: checked
+        ? [...current.memberIds, memberId]
+        : current.memberIds.filter((id) => id !== memberId),
+    }));
+  };
 
   return (
     <div className="space-y-6">
@@ -193,6 +202,7 @@ export default function ProjectManagement() {
       </section>
 
       {modalOpen && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
           <form onSubmit={submit} className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             <div className="relative flex items-center justify-between border-b border-slate-100 px-5 py-4">
@@ -208,7 +218,28 @@ export default function ProjectManagement() {
               </div>
               <label className="block text-xs font-bold text-slate-700">Trạng thái<select className={`${inputClass} mt-1.5`} value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ProjectStatus })}>{STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
               <label className="block text-xs font-bold text-slate-700">Mô tả<textarea rows={3} className={`${inputClass} mt-1.5 resize-none`} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Mục tiêu và phạm vi dự án" /></label>
-              <label className="block text-xs font-bold text-slate-700">Nhân sự tham gia<select multiple className={`${inputClass} mt-1.5 min-h-36`} value={form.memberIds} onChange={(event) => setForm({ ...form, memberIds: Array.from(event.target.selectedOptions, (option) => option.value) })}>{users.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.employeeCode}</option>)}</select><span className="mt-1 block text-[11px] font-medium text-slate-400">Đã chọn {form.memberIds.length} nhân sự</span></label>
+              <fieldset className="text-xs font-bold text-slate-700">
+                <legend>Nhân sự tham gia</legend>
+                <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-2">
+                  {users.length === 0 ? (
+                    <p className="p-2 text-[11px] font-medium text-slate-400">Chưa có nhân sự để chọn.</p>
+                  ) : users.map((person) => {
+                    const checked = form.memberIds.includes(String(person.id));
+                    return (
+                      <label key={person.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 font-medium transition-colors ${checked ? 'bg-blue-50 text-blue-800' : 'text-slate-700 hover:bg-white'}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => toggleMember(String(person.id), event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="min-w-0 truncate">{person.name} · {person.employeeCode}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <span className="mt-1 block text-[11px] font-medium text-slate-400">Đã chọn {form.memberIds.length} nhân sự</span>
+              </fieldset>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
               <button type="button" onClick={() => setModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Hủy</button>
@@ -216,6 +247,7 @@ export default function ProjectManagement() {
             </div>
           </form>
         </div>
+        </ModalPortal>
       )}
 
       <ConfirmModal

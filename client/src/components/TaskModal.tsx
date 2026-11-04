@@ -1,5 +1,6 @@
 import { type ClipboardEvent, type FormEvent, useEffect, useState } from 'react';
 import { api } from '../api/client';
+import ModalPortal from './common/ModalPortal';
 import toast from 'react-hot-toast';
 import {
   TASK_PRIORITIES,
@@ -46,7 +47,7 @@ interface FormState {
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
-  assigneeId: string;
+  assigneeIds: string[];
   startDate: string;
   estimatedDate: string;
   dueDate: string;
@@ -61,7 +62,9 @@ function toForm(task: Task | null): FormState {
     description: task?.description ?? '',
     status: task?.status ?? 'TODO',
     priority: getTaskPriority(task?.priority),
-    assigneeId: task?.assigneeId ? String(task.assigneeId) : '',
+    assigneeIds: task?.assigneeIds?.length
+      ? task.assigneeIds.map(String)
+      : task?.assigneeId ? [String(task.assigneeId)] : [],
     startDate: task?.startDate ?? '',
     estimatedDate: task?.estimatedDate ?? '',
     dueDate: task?.dueDate ?? '',
@@ -79,7 +82,8 @@ function toPayload(form: FormState) {
     description: clean(form.description),
     status: form.status,
     priority: form.priority,
-    assigneeId: form.assigneeId ? Number(form.assigneeId) : null,
+    assigneeIds: form.assigneeIds.map(Number),
+    assigneeId: form.assigneeIds.length > 0 ? Number(form.assigneeIds[0]) : null,
     startDate: clean(form.startDate),
     estimatedDate: clean(form.estimatedDate),
     dueDate: clean(form.dueDate),
@@ -247,6 +251,14 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const projectAssignees = selectedProject
     ? assignees.filter((assignee) => selectedProject.members.some((member) => member.id === assignee.id))
     : [];
+  const toggleAssignee = (assigneeId: string, checked: boolean) => {
+    setForm((current) => ({
+      ...current,
+      assigneeIds: checked
+        ? [...current.assigneeIds, assigneeId]
+        : current.assigneeIds.filter((id) => id !== assigneeId),
+    }));
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -290,6 +302,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const labelClass = 'flex items-center gap-1.5 text-xs font-bold text-slate-700 mb-1.5';
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl border border-slate-200/80 max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header Modal */}
@@ -387,8 +400,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                 className={`${inputClass} cursor-pointer`}
                 value={form.projectId}
                 onChange={(e) => {
-                  update('projectId', e.target.value);
-                  update('assigneeId', '');
+                  setForm((current) => ({ ...current, projectId: e.target.value, assigneeIds: [] }));
                 }}
                 disabled={loadingAssignees}
               >
@@ -453,23 +465,30 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                 <User size={14} className="text-emerald-500" />
                 <span>Người phụ trách</span>
               </label>
-                <select
-                className={inputClass}
-                  value={form.assigneeId}
-                  onChange={(e) => update('assigneeId', e.target.value)}
-                  disabled={loadingAssignees || !selectedProject}
-                >
-                  <option value="">Chưa phân công</option>
-                  {projectAssignees.map((assignee) => (
-                    <option key={assignee.id} value={assignee.id}>
-                      {assignee.name} · {assignee.employeeCode}
-                    </option>
-                  ))}
-                </select>
-                {assigneeLoadError && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">{assigneeLoadError}</p>}
-                {!loadingAssignees && !assigneeLoadError && selectedProject && projectAssignees.length === 0 && (
-                  <p className="mt-1.5 text-[11px] font-medium text-slate-400">Dự án chưa có nhân sự để phân công.</p>
+              <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-2">
+                {!selectedProject ? (
+                  <p className="p-2 text-[11px] font-medium text-slate-400">Chọn dự án trước khi phân công.</p>
+                ) : projectAssignees.map((assignee) => {
+                  const checked = form.assigneeIds.includes(String(assignee.id));
+                  return (
+                    <label key={assignee.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors ${checked ? 'bg-emerald-50 text-emerald-800' : 'text-slate-700 hover:bg-white'}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => toggleAssignee(String(assignee.id), event.target.checked)}
+                        disabled={loadingAssignees}
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="min-w-0 truncate">{assignee.name} · {assignee.employeeCode}</span>
+                    </label>
+                  );
+                })}
+                {!loadingAssignees && selectedProject && projectAssignees.length === 0 && (
+                  <p className="p-2 text-[11px] font-medium text-slate-400">Dự án chưa có nhân sự để phân công.</p>
                 )}
+              </div>
+              <p className="mt-1.5 text-[11px] font-medium text-slate-400">Đã chọn {form.assigneeIds.length} nhân sự</p>
+              {assigneeLoadError && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">{assigneeLoadError}</p>}
             </div>
           </div>
 
@@ -639,6 +658,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
         </div>
       )}
     </div>
+    </ModalPortal>
   );
 }
 
@@ -652,6 +672,7 @@ function historyActionLabel(action: string): string {
     status: 'đổi trạng thái',
     priority: 'đổi mức ưu tiên',
     assigneeId: 'đổi người phụ trách',
+    assigneeIds: 'đổi người phụ trách',
     estimatedDate: 'đổi ngày dự kiến',
     dueDate: 'đổi hạn chót',
     actualDate: 'cập nhật ngày hoàn thành',

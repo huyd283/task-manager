@@ -76,7 +76,7 @@ Với Gmail, bật xác minh 2 bước và tạo Google App Password; đặt gi�
 npm run db:migrate:task-workflow
 ```
 
-Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_FAIL` và mức ưu tiên mặc định `MEDIUM`; dữ liệu task hiện có được giữ nguyên. Hãy chạy migration trước khi triển khai backend/frontend mới. Tệp đính kèm hỗ trợ ảnh dưới 5 MB; PDF và text tối đa 8 MB mỗi tệp.
+Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_FAIL` và mức ưu tiên mặc định `MEDIUM`; dữ liệu task hiện có được giữ nguyên. Migration cũng tạo quan hệ nhiều-nhiều người phụ trách task và chuyển người phụ trách hiện tại sang quan hệ mới. Hãy chạy migration trước khi triển khai backend/frontend mới. Tệp đính kèm hỗ trợ ảnh dưới 5 MB; PDF và text tối đa 8 MB mỗi tệp.
 Với database từ phiên bản cũ, hãy chạy sau các migration `users`, `task-assignees` và `projects` nếu những phần đó chưa được nâng cấp.
 Backend cũng tự kiểm tra và áp dụng migration này trước khi mở cổng nhận request. Tài khoản database chạy ứng dụng cần quyền `ALTER` và `CREATE`; nếu muốn tách migration khỏi lúc khởi động, hãy chạy lệnh migration trong bước deploy trước khi khởi động backend.
 

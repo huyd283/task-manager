@@ -77,6 +77,7 @@ async function main() {
   await connection.query('SET FOREIGN_KEY_CHECKS = 0');
   await connection.query('TRUNCATE TABLE task_history');
   await connection.query('TRUNCATE TABLE task_attachments');
+  await connection.query('TRUNCATE TABLE task_assignees');
   await connection.query('TRUNCATE TABLE tasks');
   await connection.query('TRUNCATE TABLE project_members');
   await connection.query('TRUNCATE TABLE projects');
@@ -135,6 +136,10 @@ async function main() {
       [task[0], projectId, task[1], task[2], task[3], task[4], assigneeId, task[5], ...task.slice(6)],
     );
   }
+  await connection.query(
+    `INSERT IGNORE INTO task_assignees (task_id, user_id)
+     SELECT id, assignee_user_id FROM tasks WHERE assignee_user_id IS NOT NULL`,
+  );
   console.log(`✓ Seeded ${TASKS.length} tasks`);
 
   await connection.end();
