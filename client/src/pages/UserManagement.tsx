@@ -4,7 +4,6 @@ import {
   Briefcase,
   CheckCircle2,
   Edit3,
-  Filter,
   Loader2,
   Mail,
   Search,
@@ -20,6 +19,7 @@ import type { ManagedUser } from '../types';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ModalPortal from '../components/common/ModalPortal';
+import SearchableSelect, { normalizeSearchText } from '../components/common/SearchableSelect';
 
 const JOB_TITLES = ['Project Lead', 'Developer', 'Tester', 'Designer'] as const;
 const DEPARTMENTS = [
@@ -125,12 +125,12 @@ export default function UserManagement() {
     void loadUsers();
   }, [loadUsers]);
 
-  const normalizedSearch = search.trim().toLocaleLowerCase('vi');
+  const normalizedSearch = normalizeSearchText(search.trim());
   const visibleUsers = users.filter((user) => {
     const matchesSearch =
       normalizedSearch.length === 0 ||
       [user.name, user.email, user.employeeCode].some((value) =>
-        value.toLocaleLowerCase('vi').includes(normalizedSearch),
+        normalizeSearchText(value).includes(normalizedSearch),
       );
     return (
       matchesSearch &&
@@ -319,18 +319,17 @@ export default function UserManagement() {
                 aria-label="Tìm theo họ tên, email hoặc mã nhân viên"
               />
             </label>
-            <label className="relative">
-              <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select
-                value={departmentFilter}
-                onChange={(event) => setDepartmentFilter(event.target.value)}
-                className={`${inputClass} cursor-pointer pl-9`}
-                aria-label="Lọc theo phòng ban"
-              >
-                <option value="">Tất cả phòng ban</option>
-                {DEPARTMENTS.map((department) => <option key={department} value={department}>{department}</option>)}
-              </select>
-            </label>
+            <SearchableSelect
+              ariaLabel="Lọc theo phòng ban"
+              value={departmentFilter}
+              onChange={setDepartmentFilter}
+              placeholder="Tất cả phòng ban"
+              className={inputClass}
+              options={[
+                { value: '', label: 'Tất cả phòng ban' },
+                ...DEPARTMENTS.map((department) => ({ value: department, label: department })),
+              ]}
+            />
             <label className="relative">
               <Briefcase size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <select

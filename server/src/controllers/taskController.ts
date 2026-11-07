@@ -4,6 +4,8 @@ import * as taskRepo from '../repositories/taskRepository';
 import * as userRepo from '../repositories/userRepository';
 import * as projectRepo from '../repositories/projectRepository';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskPriority, type TaskStatus } from '../types';
+import { pool } from '../config/db';
+import type { RowDataPacket } from 'mysql2';
 
 function parseId(raw: string): number {
   const id = Number(raw);
@@ -25,6 +27,15 @@ function assertPriority(priority: unknown): TaskPriority {
     throw new HttpError(400, `priority must be one of: ${TASK_PRIORITIES.join(', ')}`);
   }
   return priority as TaskPriority;
+}
+
+function assertDateFilter(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ||
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
+    throw new HttpError(400, `${field} must be a valid YYYY-MM-DD date`);
+  }
+  return value;
 }
 
 function parseAssigneeIds(body: Record<string, unknown>, isPresent: boolean): number[] | undefined {
@@ -72,8 +83,54 @@ async function assertAssigneesAreActive(ids: number[] | undefined, projectId: nu
   }
 }
 
+const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+  TODO: ['IN_PROGRESS', 'PENDING'],
+  IN_PROGRESS: ['DEV_DONE', 'PENDING'],
+  DEV_DONE: ['TESTING', 'IN_PROGRESS'],
+  TESTING: ['REVIEW', 'TEST_FAIL'],
+  TEST_FAIL: ['IN_PROGRESS', 'TESTING'],
+  REVIEW: ['DONE', 'TEST_FAIL'],
+  DONE: ['GOLIVE', 'REVIEW'],
+  GOLIVE: [],
+  PENDING: ['TODO', 'IN_PROGRESS'],
+};
+
+async function validateStatusTransition(
+  existing: Task,
+  status: TaskStatus,
+  taskId: number,
+  proposedHours?: number,
+  proposedAcceptance?: string | null,
+) {
+  if (status === existing.status) return;
+  if (!ALLOWED_TRANSITIONS[existing.status].includes(status)) {
+    throw new HttpError(409, `Cannot transition task from ${existing.status} to ${status}`);
+  }
+  if (status === 'REVIEW' || status === 'DONE' || status === 'GOLIVE') {
+    const [rows] = await pool.query<Array<RowDataPacket & { remaining: number }>>(
+      "SELECT COUNT(*) AS remaining FROM task_subtasks WHERE task_id = ? AND status <> 'DONE'",
+      [taskId],
+    );
+    if (Number(rows[0]?.remaining ?? 0) > 0) {
+      throw new HttpError(409, 'Complete all subtasks before moving the task to Review or Done');
+    }
+  }
+  if (status === 'REVIEW' || status === 'DONE' || status === 'GOLIVE') {
+    const [rows] = await pool.query<Array<RowDataPacket & { require_logged_time: number; acceptance_notes: string | null }>>(
+      `SELECT p.require_logged_time, t.acceptance_notes
+       FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
+      [taskId],
+    );
+    const requiresLogged = Boolean(rows[0]?.require_logged_time);
+    const acceptance = proposedAcceptance === undefined ? rows[0]?.acceptance_notes : proposedAcceptance;
+    if (requiresLogged && (proposedHours ?? existing.loggedHours) <= 0 && !acceptance?.trim()) {
+      throw new HttpError(409, 'Log time or add acceptance notes before completing this task');
+    }
+  }
+}
+
 export async function list(req: Request, res: Response) {
-  const { status, assigneeId, priority, projectId, scope } = req.query;
+  const { status, assigneeId, priority, projectId, scope, dueFrom, dueTo } = req.query;
   const filter: taskRepo.TaskFilter = {};
 
   if (status) filter.status = assertStatus(status);
@@ -83,6 +140,11 @@ export async function list(req: Request, res: Response) {
     filter.assigneeId = parsedAssigneeId;
   }
   if (priority) filter.priority = assertPriority(priority);
+  if (dueFrom !== undefined) filter.dueFrom = assertDateFilter(dueFrom, 'dueFrom');
+  if (dueTo !== undefined) filter.dueTo = assertDateFilter(dueTo, 'dueTo');
+  if (filter.dueFrom && filter.dueTo && filter.dueFrom > filter.dueTo) {
+    throw new HttpError(400, 'dueFrom must not be later than dueTo');
+  }
   if (typeof projectId === 'string') {
     const parsedProjectId = Number(projectId);
     if (!Number.isInteger(parsedProjectId) || parsedProjectId <= 0) throw new HttpError(400, 'Invalid project id');
@@ -113,7 +175,14 @@ export async function create(req: Request, res: Response) {
   if (!Number.isInteger(projectId) || projectId <= 0) throw new HttpError(400, 'projectId is required');
   await assertProjectAccess(req, projectId);
   if (body.status !== undefined) assertStatus(body.status);
+  if (body.status !== undefined && body.status !== 'TODO') {
+    throw new HttpError(400, 'New tasks must start in To Do');
+  }
   if (body.priority !== undefined) assertPriority(body.priority);
+  if (body.estimatedHours !== undefined && body.estimatedHours !== null &&
+    (typeof body.estimatedHours !== 'number' || !Number.isFinite(body.estimatedHours) || body.estimatedHours < 0)) {
+    throw new HttpError(400, 'estimatedHours must be a non-negative number');
+  }
   const assigneeIds = parseAssigneeIds(body, Object.hasOwn(body, 'assigneeIds') || Object.hasOwn(body, 'assigneeId')) ?? [];
   await assertAssigneesAreActive(assigneeIds, projectId);
 
@@ -141,7 +210,7 @@ export async function update(req: Request, res: Response) {
   await assertTaskAccess(req, existing);
 
   const body = { ...(req.body ?? {}) };
-  for (const dateField of ['startDate', 'estimatedDate', 'actualDate'] as const) {
+  for (const dateField of ['estimatedDate', 'actualDate'] as const) {
     if (Object.hasOwn(body, dateField)) {
       const requestedDate = body[dateField] === '' ? null : body[dateField];
       if (requestedDate !== existing[dateField]) {
@@ -149,6 +218,19 @@ export async function update(req: Request, res: Response) {
       }
       delete body[dateField];
     }
+  }
+  const proposedStatus = body.status === undefined ? existing.status : assertStatus(body.status);
+  for (const dateField of ['startDate', 'dueDate'] as const) {
+    if (!Object.hasOwn(body, dateField)) continue;
+    const rawDate = body[dateField];
+    const requestedDate = rawDate === '' || rawDate === null
+      ? null
+      : assertDateFilter(rawDate, dateField);
+    const currentDate = existing[dateField]?.slice(0, 10) ?? null;
+    if (requestedDate !== currentDate && proposedStatus !== 'TODO') {
+      throw new HttpError(400, `${dateField} can only be changed while the task is TODO`);
+    }
+    body[dateField] = requestedDate;
   }
   if (body.projectId !== undefined) {
     const projectId = Number(body.projectId);
@@ -158,7 +240,28 @@ export async function update(req: Request, res: Response) {
   const targetProjectId = body.projectId === undefined ? existing.projectId : body.projectId as number;
   await assertProjectAccess(req, targetProjectId);
   if (body.status !== undefined) assertStatus(body.status);
+  if (body.status !== undefined) {
+    await validateStatusTransition(
+      existing,
+      body.status,
+      id,
+      typeof body.loggedHours === 'number' ? body.loggedHours : undefined,
+      typeof body.acceptanceNotes === 'string' || body.acceptanceNotes === null ? body.acceptanceNotes : undefined,
+    );
+  }
   if (body.priority !== undefined) assertPriority(body.priority);
+  if (body.estimatedHours !== undefined && body.estimatedHours !== null &&
+    (typeof body.estimatedHours !== 'number' || !Number.isFinite(body.estimatedHours) || body.estimatedHours < 0)) {
+    throw new HttpError(400, 'estimatedHours must be a non-negative number');
+  }
+  if (body.loggedHours !== undefined &&
+    (typeof body.loggedHours !== 'number' || !Number.isFinite(body.loggedHours) || body.loggedHours < 0)) {
+    throw new HttpError(400, 'loggedHours must be a non-negative number');
+  }
+  if (body.acceptanceNotes !== undefined && body.acceptanceNotes !== null &&
+    (typeof body.acceptanceNotes !== 'string' || body.acceptanceNotes.length > 20000)) {
+    throw new HttpError(400, 'acceptanceNotes must be 20000 characters or fewer');
+  }
   const hasAssignees = Object.hasOwn(body, 'assigneeIds') || Object.hasOwn(body, 'assigneeId');
   const assigneeIds = parseAssigneeIds(body, hasAssignees);
   await assertAssigneesAreActive(assigneeIds, targetProjectId);
@@ -194,6 +297,7 @@ export async function updateStatus(req: Request, res: Response) {
   if (!existing) throw new HttpError(404, 'Task not found');
   await assertTaskAccess(req, existing);
 
+  await validateStatusTransition(existing, status, id);
   const task = await taskRepo.updateTaskStatus(id, status, req.user!.id);
   res.json({ data: task });
 }
@@ -214,7 +318,17 @@ const ATTACHMENT_MIME_TYPES = new Set([
   'image/webp',
   'application/pdf',
   'text/plain',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]);
+const ATTACHMENT_EXTENSIONS: Record<string, readonly string[]> = {
+  'image/jpeg': ['.jpg', '.jpeg', '.jpe', '.jfif'],
+  'image/png': ['.png'],
+  'image/gif': ['.gif'],
+  'image/webp': ['.webp'],
+  'application/pdf': ['.pdf'],
+  'text/plain': ['.txt', '.text', '.log', '.md', '.csv', '.json', '.xml', '.yaml', '.yml', '.ini', '.cfg'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+};
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -238,6 +352,10 @@ export async function addAttachment(req: Request, res: Response) {
   const dataBase64 = typeof body.dataBase64 === 'string' ? body.dataBase64 : '';
   if (!fileName || fileName.length > 255) throw new HttpError(400, 'A valid fileName is required');
   if (!ATTACHMENT_MIME_TYPES.has(mimeType)) throw new HttpError(400, 'Unsupported attachment file type');
+  const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+  if (!ATTACHMENT_EXTENSIONS[mimeType]?.includes(extension)) {
+    throw new HttpError(400, 'File extension does not match the declared MIME type');
+  }
   if (!dataBase64 || dataBase64.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(dataBase64)) {
     throw new HttpError(400, 'Invalid attachment data');
   }
@@ -251,6 +369,40 @@ export async function addAttachment(req: Request, res: Response) {
 
   await taskRepo.createTaskAttachment(id, req.user!.id, fileName, mimeType, fileData);
   res.status(201).json({ data: await taskRepo.listTaskAttachments(id) });
+}
+
+export async function downloadAttachment(req: Request, res: Response) {
+  const taskId = parseId(req.params.id);
+  const attachmentId = parseId(req.params.attachmentId);
+  const task = await taskRepo.getTaskById(taskId);
+  if (!task) throw new HttpError(404, 'Task not found');
+  await assertTaskAccess(req, task);
+
+  const attachment = await taskRepo.getTaskAttachment(taskId, attachmentId);
+  if (!attachment) throw new HttpError(404, 'Attachment not found');
+  const fallbackName = attachment.fileName.replace(/[^A-Za-z0-9._-]/g, '_') || 'attachment';
+  const encodedName = encodeURIComponent(attachment.fileName).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  res.setHeader('Content-Type', attachment.mimeType);
+  res.setHeader('Content-Length', attachment.fileData.length);
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`,
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.send(attachment.fileData);
+}
+
+export async function deleteAttachment(req: Request, res: Response) {
+  const taskId = parseId(req.params.id);
+  const attachmentId = parseId(req.params.attachmentId);
+  const task = await taskRepo.getTaskById(taskId);
+  if (!task) throw new HttpError(404, 'Task not found');
+  await assertTaskAccess(req, task);
+  const deleted = await taskRepo.deleteTaskAttachment(taskId, attachmentId);
+  if (!deleted) throw new HttpError(404, 'Attachment not found');
+  res.status(204).send();
 }
 
 export async function remove(req: Request, res: Response) {

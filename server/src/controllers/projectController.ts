@@ -25,6 +25,7 @@ function parseInput(body: Record<string, unknown>) {
   const description = typeof body.description === 'string' ? body.description.trim() || null : null;
   const status = body.status ?? 'ACTIVE';
   const memberIds = body.memberIds ?? [];
+  const requireLoggedTime = body.requireLoggedTime ?? false;
   if (!code || code.length > 40) throw new HttpError(400, 'Project code is required (maximum 40 characters)');
   if (!name || name.length > 160) throw new HttpError(400, 'Project name is required (maximum 160 characters)');
   if (typeof status !== 'string' || !PROJECT_STATUSES.includes(status as (typeof PROJECT_STATUSES)[number])) {
@@ -33,7 +34,15 @@ function parseInput(body: Record<string, unknown>) {
   if (!Array.isArray(memberIds) || memberIds.some((id) => !Number.isInteger(id) || Number(id) <= 0)) {
     throw new HttpError(400, 'memberIds must be an array of positive user ids');
   }
-  return { code, name, description, status: status as (typeof PROJECT_STATUSES)[number], memberIds: [...new Set(memberIds as number[])] };
+  if (typeof requireLoggedTime !== 'boolean') throw new HttpError(400, 'requireLoggedTime must be a boolean');
+  return {
+    code,
+    name,
+    description,
+    status: status as (typeof PROJECT_STATUSES)[number],
+    memberIds: [...new Set(memberIds as number[])],
+    requireLoggedTime,
+  };
 }
 
 async function assertMembersActive(memberIds: number[]) {
@@ -108,4 +117,14 @@ export async function removeMember(req: Request, res: Response) {
   if (!(await projectRepo.projectExists(projectId))) throw new HttpError(404, 'Project not found');
   await projectRepo.removeMember(projectId, userId);
   res.status(204).send();
+}
+
+export async function updateSettings(req: Request, res: Response) {
+  requireManager(req);
+  const projectId = parseId(req.params.id);
+  if (!(await projectRepo.projectExists(projectId))) throw new HttpError(404, 'Project not found');
+  const requireLoggedTime = (req.body as { requireLoggedTime?: unknown } | undefined)?.requireLoggedTime;
+  if (typeof requireLoggedTime !== 'boolean') throw new HttpError(400, 'requireLoggedTime must be a boolean');
+  await projectRepo.setRequireLoggedTime(projectId, requireLoggedTime);
+  res.json({ data: { projectId, requireLoggedTime } });
 }

@@ -1,4 +1,4 @@
-/** The five task states supported by the board. */
+/** Task workflow states supported by the board and API. */
 export const TASK_STATUSES = [
   'TODO',
   'IN_PROGRESS',
@@ -6,6 +6,8 @@ export const TASK_STATUSES = [
   'TESTING',
   'TEST_FAIL',
   'DONE',
+  'REVIEW',
+  'GOLIVE',
   'PENDING',
 ] as const;
 
@@ -30,6 +32,12 @@ export interface Task {
   estimatedDate: string | null;
   dueDate: string | null;
   actualDate: string | null;
+  estimatedHours: number | null;
+  loggedHours: number;
+  goliveDate: string | null;
+  acceptanceNotes: string | null;
+  subtaskProgress: number;
+  sprintId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -67,6 +75,9 @@ export interface CreateTaskInput {
   estimatedDate?: string | null;
   dueDate?: string | null;
   actualDate?: string | null;
+  estimatedHours?: number | null;
+  loggedHours?: number;
+  acceptanceNotes?: string | null;
 }
 
 export type UpdateTaskInput = Partial<CreateTaskInput>;

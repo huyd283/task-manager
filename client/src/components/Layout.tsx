@@ -18,6 +18,7 @@ import {
   UserCheck,
   FolderKanban,
   AlarmClock,
+  Timer,
 } from "lucide-react";
 import logoFull from "../assets/img/logo/logo.jpg";
 import logoSmall from "../assets/img/logo/logo-small.jpg";
@@ -257,6 +258,11 @@ export default function Layout() {
             <NavLink to="/projects" className={navItemClass}>
               <FolderKanban size={18} className="shrink-0" />
               {isSidebarOpen && <span>Quản lý Dự án</span>}
+            </NavLink>
+
+            <NavLink to="/sprints" className={navItemClass}>
+              <Timer size={18} className="shrink-0" />
+              {isSidebarOpen && <span>Quản lý Sprint</span>}
             </NavLink>
 
             {/* Menu Báo cáo */}

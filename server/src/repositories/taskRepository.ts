@@ -1,5 +1,6 @@
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { pool } from '../config/db';
+import { HttpError } from '../middleware/errorHandler';
 import type { CreateTaskInput, Task, TaskPriority, TaskStatus, UpdateTaskInput } from '../types';
 
 interface TaskRow extends RowDataPacket {
@@ -19,6 +20,12 @@ interface TaskRow extends RowDataPacket {
   estimated_date: string | null;
   due_date: string | null;
   actual_date: string | null;
+  estimated_time: number | string | null;
+  logged_hours: number | string;
+  golive_date: string | null;
+  acceptance_notes: string | null;
+  subtask_progress: number | string;
+  sprint_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +49,12 @@ function mapRow(row: TaskRow): Task {
     estimatedDate: row.estimated_date,
     dueDate: row.due_date,
     actualDate: row.actual_date,
+    estimatedHours: row.estimated_time === null ? null : Number(row.estimated_time),
+    loggedHours: Number(row.logged_hours ?? 0),
+    goliveDate: row.golive_date,
+    acceptanceNotes: row.acceptance_notes,
+    subtaskProgress: Number(row.subtask_progress ?? 0),
+    sprintId: row.sprint_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -59,9 +72,14 @@ const COLUMN_MAP: Record<string, string> = {
   estimatedDate: 'estimated_date',
   dueDate: 'due_date',
   actualDate: 'actual_date',
+  estimatedHours: 'estimated_time',
+  loggedHours: 'logged_hours',
+  acceptanceNotes: 'acceptance_notes',
 };
 
 const TASK_SELECT = `SELECT tasks.*, projects.name AS project,
+       COALESCE((SELECT ROUND(100 * SUM(ts.status = 'DONE') / NULLIF(COUNT(*), 0))
+                 FROM task_subtasks ts WHERE ts.task_id = tasks.id), 0) AS subtask_progress,
        COALESCE(primary_assignee.name, tasks.assignee) AS assignee,
        (SELECT GROUP_CONCAT(ta.user_id ORDER BY ta.user_id SEPARATOR ',')
         FROM task_assignees ta WHERE ta.task_id = tasks.id) AS assignee_ids,
@@ -79,6 +97,8 @@ export interface TaskFilter {
   priority?: TaskPriority;
   projectId?: number;
   userId?: number;
+  dueFrom?: string;
+  dueTo?: string;
 }
 
 export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
@@ -104,6 +124,14 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
   if (filter.userId) {
     clauses.push('EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = tasks.project_id AND pm.user_id = ?)');
     params.push(filter.userId);
+  }
+  if (filter.dueFrom) {
+    clauses.push('tasks.due_date >= ?');
+    params.push(filter.dueFrom);
+  }
+  if (filter.dueTo) {
+    clauses.push('tasks.due_date <= ?');
+    params.push(filter.dueTo);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -154,8 +182,8 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
     const [result] = await connection.query<ResultSetHeader>(
       `INSERT INTO tasks
          (task_code, project_id, project, title, description, status, priority, assignee_user_id, assignee,
-          start_date, estimated_date, due_date, actual_date)
-        VALUES (?, ?, (SELECT name FROM projects WHERE id = ?), ?, ?, ?, ?, ?, (SELECT name FROM users WHERE id = ?), ?, ?, ?, ?)`,
+          start_date, estimated_date, due_date, actual_date, estimated_time, logged_hours)
+        VALUES (?, ?, (SELECT name FROM projects WHERE id = ?), ?, ?, ?, ?, ?, (SELECT name FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?)`,
       [
         input.taskCode,
         input.projectId,
@@ -170,6 +198,8 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
         input.estimatedDate ?? null,
         input.dueDate ?? null,
         input.actualDate ?? null,
+        input.estimatedHours ?? null,
+        input.loggedHours ?? 0,
       ],
     );
     if (assigneeIds.length > 0) {
@@ -217,12 +247,31 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
       await connection.commit();
       return null;
     }
+    const dateValue = (value: unknown) => value == null ? null : String(value).slice(0, 10);
+    const dateChanges = (['startDate', 'dueDate'] as const).some(
+      (field) => field in input &&
+        dateValue(input[field]) !== dateValue(current[field === 'startDate' ? 'start_date' : 'due_date']),
+    );
+    const staysTodo = current.status === 'TODO' && (input.status === undefined || input.status === 'TODO');
+    const returnsToTodo = current.status === 'PENDING' && input.status === 'TODO';
+    if (dateChanges && !staysTodo && !returnsToTodo) {
+      throw new HttpError(400, 'Start date and due date can only be changed while the task is TODO');
+    }
+    if (input.status === 'REVIEW' || input.status === 'DONE' || input.status === 'GOLIVE') {
+      const [incomplete] = await connection.query<RowDataPacket[]>(
+        "SELECT id FROM task_subtasks WHERE task_id = ? AND status <> 'DONE' LIMIT 1 FOR UPDATE",
+        [id],
+      );
+      if (incomplete.length > 0) {
+        throw new HttpError(409, 'Complete all subtasks before moving the task to Review or completion');
+      }
+    }
 
     const changes: Array<{ action: string; oldValue: string | null; newValue: string | null }> = [];
     const sets: string[] = [];
     const params: unknown[] = [];
     for (const [key, column] of Object.entries(COLUMN_MAP)) {
-      if (key === 'startDate' || key === 'assigneeId' || !(key in input)) continue;
+      if (key === 'assigneeId' || !(key in input)) continue;
       const newValue = (input as Record<string, unknown>)[key] ?? null;
       let oldValue: unknown = current[column];
 
@@ -238,10 +287,11 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
         }
         sets.push(`${column} = ?`);
         params.push(newValue);
+        if (String(current.project_id) !== String(newValue)) sets.push('sprint_id = NULL');
         continue;
       }
 
-      const dateField = ['estimatedDate', 'dueDate', 'actualDate'].includes(key);
+      const dateField = ['startDate', 'estimatedDate', 'dueDate', 'actualDate'].includes(key);
       const normalize = (value: unknown) => value == null ? null : dateField ? String(value).slice(0, 10) : String(value);
       if (normalize(oldValue) !== normalize(newValue)) {
         changes.push({
@@ -296,7 +346,14 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
       params.push(primaryAssigneeId, primaryAssigneeId === null ? null : namesById.get(primaryAssigneeId) ?? null);
     }
 
-    if (input.status === 'DONE' && current.actual_date == null && !('actualDate' in input)) {
+    if (input.status === 'GOLIVE' && current.golive_date == null) {
+      sets.push('golive_date = CURDATE()');
+      changes.push({ action: 'goliveDate', oldValue: null, newValue: new Date().toISOString().slice(0, 10) });
+    } else if (input.status !== 'GOLIVE' && current.golive_date != null) {
+      sets.push('golive_date = NULL');
+    }
+
+    if ((input.status === 'DONE' || input.status === 'GOLIVE') && current.actual_date == null && !('actualDate' in input)) {
       const [todayRows] = await connection.query<Array<RowDataPacket & { today: string }>>(
         "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today",
       );
@@ -346,6 +403,7 @@ export interface TaskAttachment {
   taskId: number;
   fileName: string;
   mimeType: string;
+  fileSize: number;
   dataBase64: string;
   userName: string | null;
   createdAt: string;
@@ -354,13 +412,26 @@ export interface TaskAttachment {
 export async function listTaskAttachments(taskId: number): Promise<TaskAttachment[]> {
   const [rows] = await pool.query<Array<RowDataPacket & TaskAttachment>>(
     `SELECT a.id, a.task_id AS taskId, a.file_name AS fileName, a.mime_type AS mimeType,
+            OCTET_LENGTH(a.file_data) AS fileSize,
             REPLACE(REPLACE(TO_BASE64(a.file_data), CHAR(10), ''), CHAR(13), '') AS dataBase64,
             u.name AS userName, a.created_at AS createdAt
      FROM task_attachments a LEFT JOIN users u ON u.id = a.user_id
      WHERE a.task_id = ? ORDER BY a.created_at DESC, a.id DESC`,
     [taskId],
   );
-  return rows;
+  return rows.map((row) => ({ ...row, fileSize: Number(row.fileSize) }));
+}
+
+export async function getTaskAttachment(
+  taskId: number,
+  attachmentId: number,
+): Promise<{ fileName: string; mimeType: string; fileData: Buffer } | null> {
+  const [rows] = await pool.query<Array<RowDataPacket & { fileName: string; mimeType: string; fileData: Buffer }>>(
+    `SELECT file_name AS fileName, mime_type AS mimeType, file_data AS fileData
+     FROM task_attachments WHERE task_id = ? AND id = ? LIMIT 1`,
+    [taskId, attachmentId],
+  );
+  return rows[0] ?? null;
 }
 
 export async function createTaskAttachment(
@@ -390,6 +461,14 @@ export async function createTaskAttachment(
   }
 }
 
+export async function deleteTaskAttachment(taskId: number, attachmentId: number): Promise<boolean> {
+  const [result] = await pool.query<ResultSetHeader>(
+    'DELETE FROM task_attachments WHERE id = ? AND task_id = ?',
+    [attachmentId, taskId],
+  );
+  return result.affectedRows > 0;
+}
+
 export async function deleteTask(id: number): Promise<boolean> {
   const [result] = await pool.query<ResultSetHeader>(
     'DELETE FROM tasks WHERE id = ?',
@@ -415,6 +494,10 @@ export interface AssigneeStat {
   testing: number;
   testFail: number;
   done: number;
+  review: number;
+  golive: number;
+  estimatedHours: number;
+  loggedHours: number;
   pending: number;
   overdue: number;
   completionRate: number;
@@ -438,8 +521,12 @@ export async function getStatsByAssignee(userId?: number): Promise<AssigneeStat[
        COUNT(DISTINCT CASE WHEN tasks.status = 'TESTING' THEN tasks.id END) AS testing,
        COUNT(DISTINCT CASE WHEN tasks.status = 'TEST_FAIL' THEN tasks.id END) AS testFail,
        COUNT(DISTINCT CASE WHEN tasks.status = 'DONE' THEN tasks.id END) AS done,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'REVIEW' THEN tasks.id END) AS review,
+       COUNT(DISTINCT CASE WHEN tasks.status = 'GOLIVE' THEN tasks.id END) AS golive,
+       SUM(tasks.estimated_time) AS estimatedHours,
+       SUM(tasks.logged_hours) AS loggedHours,
        COUNT(DISTINCT CASE WHEN tasks.status = 'PENDING' THEN tasks.id END) AS pending,
-       COUNT(DISTINCT CASE WHEN tasks.status <> 'DONE' AND tasks.due_date IS NOT NULL AND tasks.due_date < CURDATE() THEN tasks.id END) AS overdue
+       COUNT(DISTINCT CASE WHEN tasks.status NOT IN ('DONE','GOLIVE') AND tasks.due_date IS NOT NULL AND tasks.due_date < CURDATE() THEN tasks.id END) AS overdue
     FROM tasks
     LEFT JOIN task_assignees ta ON ta.task_id = tasks.id
     LEFT JOIN users assigned_user ON assigned_user.id = COALESCE(ta.user_id, tasks.assignee_user_id)
@@ -452,6 +539,7 @@ export async function getStatsByAssignee(userId?: number): Promise<AssigneeStat[
   return rows.map((r) => {
     const total = Number(r.total);
     const done = Number(r.done);
+    const golive = Number(r.golive);
     return {
       assignee: r.assignee as string,
       total,
@@ -461,9 +549,13 @@ export async function getStatsByAssignee(userId?: number): Promise<AssigneeStat[
       testing: Number(r.testing),
       testFail: Number(r.testFail),
       done,
+      review: Number(r.review),
+      golive,
+      estimatedHours: Number(r.estimatedHours ?? 0),
+      loggedHours: Number(r.loggedHours ?? 0),
       pending: Number(r.pending),
       overdue: Number(r.overdue),
-      completionRate: total > 0 ? Math.round((done / total) * 100) : 0,
+      completionRate: total > 0 ? Math.round((golive / total) * 100) : 0,
     };
   });
 }

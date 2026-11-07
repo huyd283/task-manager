@@ -6,6 +6,7 @@ import type { AssignableUser, Project, ProjectStatus } from '../types';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 import ModalPortal from '../components/common/ModalPortal';
+import SearchableSelect, { normalizeSearchText } from '../components/common/SearchableSelect';
 
 const STATUSES: Array<{ value: ProjectStatus; label: string; style: string }> = [
   { value: 'PLANNING', label: 'Lên kế hoạch', style: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -14,7 +15,7 @@ const STATUSES: Array<{ value: ProjectStatus; label: string; style: string }> = 
   { value: 'COMPLETED', label: 'Hoàn thành', style: 'bg-slate-100 text-slate-600 border-slate-200' },
 ];
 
-const emptyForm = { code: '', name: '', description: '', status: 'ACTIVE' as ProjectStatus, memberIds: [] as string[] };
+const emptyForm = { code: '', name: '', description: '', status: 'ACTIVE' as ProjectStatus, memberIds: [] as string[], requireLoggedTime: false };
 const inputClass = 'w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm font-medium text-slate-800 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10';
 
 function statusMeta(status: ProjectStatus) {
@@ -38,6 +39,8 @@ export default function ProjectManagement() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberDepartment, setMemberDepartment] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,6 +78,7 @@ export default function ProjectManagement() {
       description: project.description ?? '',
       status: project.status,
       memberIds: project.members.map((member) => String(member.id)),
+      requireLoggedTime: Boolean(project.require_logged_time),
     });
     setFormError('');
     setModalOpen(true);
@@ -127,6 +131,12 @@ export default function ProjectManagement() {
         : current.memberIds.filter((id) => id !== memberId),
     }));
   };
+  const memberDepartments = [...new Set(users.map((person) => person.department).filter(Boolean))].sort();
+  const filteredUsers = users.filter((person) => {
+    const query = normalizeSearchText(memberSearch.trim());
+    const matchesText = !query || [person.name, person.email, person.username].some((value) => value && normalizeSearchText(value).includes(query));
+    return matchesText && (!memberDepartment || person.department === memberDepartment);
+  });
 
   return (
     <div className="space-y-6">
@@ -218,12 +228,32 @@ export default function ProjectManagement() {
               </div>
               <label className="block text-xs font-bold text-slate-700">Trạng thái<select className={`${inputClass} mt-1.5`} value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ProjectStatus })}>{STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
               <label className="block text-xs font-bold text-slate-700">Mô tả<textarea rows={3} className={`${inputClass} mt-1.5 resize-none`} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Mục tiêu và phạm vi dự án" /></label>
+              <label className="flex items-start gap-2 text-xs font-semibold text-slate-700">
+                <input type="checkbox" checked={form.requireLoggedTime} onChange={(event) => setForm({ ...form, requireLoggedTime: event.target.checked })} className="mt-0.5" />
+                <span>Bắt buộc ghi Logged Time hoặc thông tin nghiệm thu trước khi hoàn tất task</span>
+              </label>
               <fieldset className="text-xs font-bold text-slate-700">
                 <legend>Nhân sự tham gia</legend>
-                <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-2">
+                <div className="mb-2 grid gap-2 sm:grid-cols-2">
+                  <input className={inputClass} value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Tìm tên, email, username" />
+                  <SearchableSelect
+                    ariaLabel="Lọc nhân sự theo phòng ban"
+                    className={inputClass}
+                    value={memberDepartment}
+                    onChange={setMemberDepartment}
+                    placeholder="Mọi phòng ban"
+                    options={[
+                      { value: '', label: 'Mọi phòng ban' },
+                      ...memberDepartments.map((department) => ({ value: department, label: department })),
+                    ]}
+                  />
+                </div>
+                <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-2">
                   {users.length === 0 ? (
                     <p className="p-2 text-[11px] font-medium text-slate-400">Chưa có nhân sự để chọn.</p>
-                  ) : users.map((person) => {
+                  ) : filteredUsers.length === 0 ? (
+                    <p className="p-2 text-[11px] font-medium text-slate-400">Không có nhân sự active phù hợp.</p>
+                  ) : filteredUsers.map((person) => {
                     const checked = form.memberIds.includes(String(person.id));
                     return (
                       <label key={person.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 font-medium transition-colors ${checked ? 'bg-blue-50 text-blue-800' : 'text-slate-700 hover:bg-white'}`}>

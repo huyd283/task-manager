@@ -27,6 +27,7 @@ export interface ProjectInput {
   description: string | null;
   status: ProjectRecord['status'];
   memberIds: number[];
+  requireLoggedTime: boolean;
 }
 
 export async function listProjects(userId?: number): Promise<ProjectRecord[]> {
@@ -76,8 +77,8 @@ export async function createProject(input: ProjectInput): Promise<number> {
   try {
     await connection.beginTransaction();
     const [result] = await connection.query<ResultSetHeader>(
-      'INSERT INTO projects (code, name, description, status) VALUES (?, ?, ?, ?)',
-      [input.code, input.name, input.description, input.status],
+      'INSERT INTO projects (code, name, description, status, require_logged_time) VALUES (?, ?, ?, ?, ?)',
+      [input.code, input.name, input.description, input.status, input.requireLoggedTime ? 1 : 0],
     );
     await replaceMembers(connection, result.insertId, input.memberIds);
     await connection.commit();
@@ -95,8 +96,8 @@ export async function updateProject(id: number, input: ProjectInput): Promise<vo
   try {
     await connection.beginTransaction();
     await connection.query(
-      'UPDATE projects SET code = ?, name = ?, description = ?, status = ? WHERE id = ?',
-      [input.code, input.name, input.description, input.status, id],
+      'UPDATE projects SET code = ?, name = ?, description = ?, status = ?, require_logged_time = ? WHERE id = ?',
+      [input.code, input.name, input.description, input.status, input.requireLoggedTime ? 1 : 0, id],
     );
     await replaceMembers(connection, id, input.memberIds);
     await connection.commit();
@@ -122,6 +123,10 @@ export async function addMember(projectId: number, userId: number, role: string)
 
 export async function removeMember(projectId: number, userId: number): Promise<void> {
   await pool.query('DELETE FROM project_members WHERE project_id = ? AND user_id = ?', [projectId, userId]);
+}
+
+export async function setRequireLoggedTime(projectId: number, required: boolean): Promise<void> {
+  await pool.query('UPDATE projects SET require_logged_time = ? WHERE id = ?', [required ? 1 : 0, projectId]);
 }
 
 async function replaceMembers(connection: Awaited<ReturnType<typeof pool.getConnection>>, projectId: number, memberIds: number[]) {

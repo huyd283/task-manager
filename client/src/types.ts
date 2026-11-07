@@ -5,10 +5,23 @@ export const TASK_STATUSES = [
   'TESTING',
   'TEST_FAIL',
   'DONE',
+  'REVIEW',
+  'GOLIVE',
   'PENDING',
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+export const STATUS_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+  TODO: ['IN_PROGRESS', 'PENDING'],
+  IN_PROGRESS: ['DEV_DONE', 'PENDING'],
+  DEV_DONE: ['TESTING', 'IN_PROGRESS'],
+  TESTING: ['REVIEW', 'TEST_FAIL'],
+  TEST_FAIL: ['IN_PROGRESS', 'TESTING'],
+  REVIEW: ['DONE', 'TEST_FAIL'],
+  DONE: ['GOLIVE', 'REVIEW'],
+  GOLIVE: [],
+  PENDING: ['TODO', 'IN_PROGRESS'],
+};
 export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
@@ -29,6 +42,12 @@ export interface Task {
   estimatedDate: string | null;
   dueDate: string | null;
   actualDate: string | null;
+  estimatedHours: number | null;
+  loggedHours: number;
+  goliveDate: string | null;
+  acceptanceNotes: string | null;
+  subtaskProgress: number;
+  sprintId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +82,7 @@ export interface Project {
   name: string;
   description: string | null;
   status: ProjectStatus;
+  require_logged_time?: boolean;
   created_at?: string;
   updated_at?: string;
   task_count: number;
@@ -85,6 +105,7 @@ export interface ManagedUser {
 export interface AssignableUser {
   id: number;
   name: string;
+  username?: string;
   email: string;
   employeeCode: string;
   jobTitle: string;
@@ -100,6 +121,10 @@ export interface AssigneeStat {
   testing: number;
   testFail: number;
   done: number;
+  review: number;
+  golive: number;
+  estimatedHours: number;
+  loggedHours: number;
   pending: number;
   overdue: number;
   completionRate: number;
@@ -113,6 +138,8 @@ export const STATUS_META: Record<TaskStatus, { label: string; badge: string }> =
   TESTING: { label: 'Testing', badge: 'bg-amber-100 text-amber-700' },
   TEST_FAIL: { label: 'Test Fail', badge: 'bg-rose-100 text-rose-700' },
   DONE: { label: 'Done', badge: 'bg-emerald-100 text-emerald-700' },
+  REVIEW: { label: 'Review', badge: 'bg-amber-100 text-amber-800' },
+  GOLIVE: { label: 'Golive', badge: 'bg-purple-100 text-purple-800' },
   PENDING: { label: 'Pending', badge: 'bg-rose-100 text-rose-700' },
 };
 
@@ -145,6 +172,7 @@ export interface TaskAttachment {
   taskId: number;
   fileName: string;
   mimeType: string;
+  fileSize: number;
   dataBase64: string;
   userName: string | null;
   createdAt: string;
@@ -155,7 +183,7 @@ export function getDeadlineState(
   status: TaskStatus,
   now: Date = new Date(),
 ): 'overdue' | 'soon' | null {
-  if (!dueDate || status === 'DONE') return null;
+  if (!dueDate || status === 'DONE' || status === 'GOLIVE') return null;
   const [year, month, day] = dueDate.slice(0, 10).split('-').map(Number);
   const deadline = new Date(year, month - 1, day, 23, 59, 59, 999);
   if (

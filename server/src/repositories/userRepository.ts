@@ -41,6 +41,7 @@ export interface AuthUserRow extends RowDataPacket {
 export interface AssignableUserRow extends RowDataPacket {
   id: number;
   name: string;
+  username: string;
   email: string;
   employee_code: string;
   job_title: string;
@@ -61,6 +62,15 @@ function employeeCode(id: number): string {
 
 function temporaryEmployeeCode(): string {
   return `TMP-${randomBytes(8).toString('hex')}`;
+}
+
+function temporaryUsername(): string {
+  return `TMP-${randomBytes(8).toString('hex')}`;
+}
+
+function usernameFor(email: string, id: number): string {
+  const localPart = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 60) || 'user';
+  return `${localPart}-${id}`;
 }
 
 export async function findUserByEmail(email: string): Promise<UserRow | null> {
@@ -98,7 +108,7 @@ export async function listManagedUsers(): Promise<ManagedUserRow[]> {
 
 export async function listAssignableUsers(): Promise<AssignableUserRow[]> {
   const [rows] = await pool.query<AssignableUserRow[]>(
-    `SELECT id, name, email, employee_code, job_title, department
+    `SELECT id, name, username, email, employee_code, job_title, department
      FROM users WHERE is_active = 1 ORDER BY name ASC`,
   );
   return rows;
@@ -133,12 +143,12 @@ export async function isEmailInUse(email: string, exceptId?: number): Promise<bo
 export async function createManagedUser(input: ManagedUserInput): Promise<ManagedUserRow> {
   const temporaryCode = temporaryEmployeeCode();
   const [result] = await pool.query<ResultSetHeader>(
-    `INSERT INTO users (name, email, password, role, employee_code, job_title, department)
-     VALUES (?, ?, ?, 'member', ?, ?, ?)`,
-    [input.name, input.email, input.password, temporaryCode, input.jobTitle, input.department],
+    `INSERT INTO users (name, email, username, password, role, employee_code, job_title, department)
+     VALUES (?, ?, ?, ?, 'member', ?, ?, ?)`,
+    [input.name, input.email, temporaryUsername(), input.password, temporaryCode, input.jobTitle, input.department],
   );
   const id = result.insertId;
-  await pool.query('UPDATE users SET employee_code = ? WHERE id = ?', [employeeCode(id), id]);
+  await pool.query('UPDATE users SET employee_code = ?, username = ? WHERE id = ?', [employeeCode(id), usernameFor(input.email, id), id]);
   const user = await getManagedUserById(id);
   if (!user) throw new Error('Created user could not be loaded');
   return user;
@@ -181,10 +191,13 @@ export async function createUser(input: {
 }): Promise<number> {
   const temporaryCode = temporaryEmployeeCode();
   const [result] = await pool.query<ResultSetHeader>(
-    `INSERT INTO users (name, email, password, role, employee_code)
-     VALUES (?, ?, ?, ?, ?)`,
-    [input.name, input.email, input.password, input.role ?? 'member', temporaryCode],
+    `INSERT INTO users (name, email, username, password, role, employee_code)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [input.name, input.email, temporaryUsername(), input.password, input.role ?? 'member', temporaryCode],
   );
-  await pool.query('UPDATE users SET employee_code = ? WHERE id = ?', [employeeCode(result.insertId), result.insertId]);
+  await pool.query(
+    'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
+    [employeeCode(result.insertId), usernameFor(input.email, result.insertId), result.insertId],
+  );
   return result.insertId;
 }

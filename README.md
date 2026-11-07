@@ -80,6 +80,14 @@ Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_
 Với database từ phiên bản cũ, hãy chạy sau các migration `users`, `task-assignees` và `projects` nếu những phần đó chưa được nâng cấp.
 Backend cũng tự kiểm tra và áp dụng migration này trước khi mở cổng nhận request. Tài khoản database chạy ứng dụng cần quyền `ALTER` và `CREATE`; nếu muốn tách migration khỏi lúc khởi động, hãy chạy lệnh migration trong bước deploy trước khi khởi động backend.
 
+Để nâng cấp giờ dự tính/giờ thực tế, bình luận, subtask, sprint và Golive, chạy:
+
+```bash
+npm run db:migrate:task-features
+```
+
+Migration thêm `tasks.estimated_time DECIMAL(8,2)` (đơn vị giờ), `logged_hours`, `golive_date`, `acceptance_notes`, `sprint_id`; tạo `task_comments`, `task_subtasks`, `sprints`; thêm `users.username` và cấu hình `projects.require_logged_time`. `estimated_date` vẫn là ngày dự kiến trên lịch, không phải estimate effort. Vì phiên bản cũ không lưu estimate effort thành số giờ có thể quy đổi an toàn, dữ liệu mới được đặt `NULL` thay vì tự suy đoán/nhân ngày thành giờ. Migration chạy tự động khi server khởi động; deploy có thể chạy lệnh tường minh trước đó. Cần chạy sau migration workflow/projects/users trên database cũ.
+
 ## 4. Khởi tạo database + seed mock data
 
 Script này tạo database nếu chưa có, tạo bảng ứng dụng (gồm `users`, `projects`, `project_members`, `tasks`, `task_history`, `task_attachments`) và nạp dữ liệu mẫu:
@@ -130,16 +138,23 @@ Tài khoản chỉ được tạo sau OTP hợp lệ. Mã nhân viên mới có 
 
 | Method | Endpoint                        | Mô tả                                   |
 | ------ | ------------------------------- | --------------------------------------- |
-| GET    | `/api/tasks`                    | Danh sách theo quyền dự án (lọc `?status=&assigneeId=&projectId=&priority=`) |
+| GET    | `/api/tasks`                    | Danh sách theo quyền dự án; lọc `status`, `assigneeId`, `projectId`, `priority`, `dueFrom`, `dueTo` |
 | GET    | `/api/tasks/:id`                | Chi tiết một task                        |
 | POST   | `/api/tasks`                    | Tạo task                                 |
 | PUT    | `/api/tasks/:id`                | Cập nhật toàn bộ task                    |
 | PATCH  | `/api/tasks/:id/status`         | Cập nhật trạng thái `{ status }`         |
 | GET    | `/api/tasks/:id/history`        | Lịch sử thao tác và người thay đổi       |
 | GET    | `/api/tasks/:id/attachments`    | Danh sách ảnh/tệp đính kèm               |
-| POST   | `/api/tasks/:id/attachments`    | Tải tệp lên bằng `{ fileName, mimeType, dataBase64 }` |
+| POST   | `/api/tasks/:id/attachments`    | Tải tệp lên bằng `{ fileName, mimeType, dataBase64 }`; backend đối chiếu MIME type/phần mở rộng |
+| GET    | `/api/tasks/:id/attachments/:attachmentId/download` | Tải tệp đính kèm với tên file UTF-8 |
+| DELETE | `/api/tasks/:id/attachments/:attachmentId` | Xóa tệp đính kèm của task |
 | DELETE | `/api/tasks/:id`                | Xoá task                                 |
 | GET    | `/api/tasks/stats/by-assignee`  | Thống kê báo cáo theo nhân sự            |
+| GET    | `/api/tasks/export`              | CSV; lọc `projectId`, `sprintId`, `from`, `to`, `assigneeId` |
+| GET/POST | `/api/tasks/:id/comments`      | Danh sách/tạo comment Markdown; POST `{ body }` |
+| PUT/DELETE | `/api/tasks/:id/comments/:commentId` | Sửa/xóa comment do chính user tạo |
+| GET/POST | `/api/tasks/:id/subtasks`      | Danh sách/tạo subtask |
+| PATCH/DELETE | `/api/tasks/:id/subtasks/:subtaskId` | Cập nhật `{ title, status, assigneeId, estimatedHours }` / xóa |
 
 ### Quản lý dự án
 
@@ -154,6 +169,11 @@ Mọi endpoint yêu cầu token. Thành viên chỉ thấy dự án/task thuộc
 | DELETE | `/api/projects/:id` | Xóa dự án chưa có task (admin/Project Lead) |
 | POST | `/api/projects/:id/members` | Thêm/cập nhật thành viên với `{ userId, roleInProject }` |
 | DELETE | `/api/projects/:id/members/:userId` | Gỡ thành viên |
+| GET | `/api/projects/:projectId/members/options` | Thành viên active của đúng dự án, dùng cho filter/assign |
+| PATCH | `/api/projects/:id/settings` | `{ requireLoggedTime: boolean }` (admin/Project Lead) |
+| GET/POST | `/api/projects/:projectId/sprints` | Danh sách/tạo Sprint `{ name, startDate, endDate, goal }` |
+| PATCH | `/api/projects/:projectId/sprints/:sprintId/status` | `{ status: "ACTIVE" \| "COMPLETED" }`; đóng sprint đưa task chưa Golive về backlog |
+| POST/DELETE | `/api/projects/:projectId/sprints/:sprintId/tasks[/:taskId]` | Thêm task vào sprint bằng `{ taskId }` / chuyển về backlog |
 
 ### Quản lý nhân sự
 
@@ -171,7 +191,11 @@ Chức danh công việc (`Project Lead`, `Developer`, `Tester`, `Designer`) đ�
 
 ### Trạng thái (status)
 
-`TODO` · `IN_PROGRESS` · `DEV_DONE` · `TESTING` · `TEST_FAIL` · `DONE` · `PENDING`
+`TODO` → `IN_PROGRESS` → `DEV_DONE` → `TESTING` → `REVIEW` → `DONE` → `GOLIVE`
+
+Các nhánh lỗi/hoãn: `TESTING → TEST_FAIL → IN_PROGRESS`, `TODO/IN_PROGRESS → PENDING → TODO/IN_PROGRESS`. Server từ chối các bước nhảy trạng thái; không cho vào `REVIEW`/`DONE` khi còn subtask chưa xong. Khi project bật `require_logged_time`, phải có logged hours hoặc acceptance notes trước `DONE`/`GOLIVE`. Chỉ `GOLIVE` được tính là hoàn thành 100%.
+
+Chỉ task ở trạng thái `TODO` mới được đổi `startDate` và `dueDate`; server kiểm tra trong transaction để không thể bỏ qua quy tắc qua API. Ngày bắt đầu và ngày dự kiến hoàn thành trên danh sách dùng định dạng `DD/MM/YYYY`.
 
 ### Model Task
 
@@ -180,9 +204,29 @@ Chức danh công việc (`Project Lead`, `Developer`, `Tester`, `Designer`) đ�
   id, taskCode, projectId, project, title, description,
   status, priority, assignee,
   startDate, estimatedDate, dueDate, actualDate,
+  estimatedHours, loggedHours, goliveDate, sprintId, subtaskProgress,
   createdAt, updatedAt
 }
 ```
+
+### Cập nhật UI cho 8 tính năng
+
+1. **Estimate theo giờ:** Task modal nhập `estimatedHours` dạng số thập phân, `loggedHours` và acceptance notes; danh sách/Dashboard/Báo cáo hiển thị giờ. `estimatedDate` vẫn là ngày lịch.
+2. **Comment/Subtask:** Chi tiết task có tab Comment (Markdown an toàn, timestamp, chèn `@username`) và Subtask (assignee, trạng thái, giờ, tiến độ %). Nội dung comment được render thành text/React nodes, không chèn HTML tùy ý.
+3. **Filter theo thành viên:** Chọn dự án trước; danh sách thành viên trong Task/Urgent và bộ lọc assignee chỉ gọi `/projects/:projectId/members/options`, không tải user toàn hệ thống. Kết hợp với trạng thái, ưu tiên, hạn chót.
+4. **Sprint:** `/sprints` cung cấp tạo Sprint, chọn task từ Backlog, Start/Complete. Việc đưa task vào sprint dùng thao tác chọn thay cho drag-drop; đóng sprint chuyển task chưa Golive về Backlog.
+5. **Workflow:** Dropdown chỉ hiện trạng thái hiện tại và bước hợp lệ kế tiếp; API cũng kiểm tra transition để ngăn client bỏ qua quy tắc.
+6. **Golive:** Badge tím riêng; ngày Golive được ghi nhận khi chuyển `DONE → GOLIVE`; Dashboard và báo cáo chỉ đếm Golive là hoàn tất.
+7. **Export:** Màn hình Báo cáo hỗ trợ tải CSV UTF-8 theo project/sprint/ngày/nhân sự. CSV được escape và chặn chuỗi mở đầu công thức bảng tính.
+8. **Gán thành viên:** Modal task lọc user active đã thuộc dự án bằng tìm tên/email/username và phòng ban; backend vẫn xác thực assignee thuộc project.
+
+### Select tìm kiếm dùng chung
+
+Các danh sách dự án, thành viên, sprint và trạng thái dài dùng `client/src/components/common/SearchableSelect.tsx`. Component hỗ trợ tìm kiếm khi mở (auto-focus), so khớp không phân biệt hoa/thường và dấu tiếng Việt, điều hướng bằng ↑/↓ + Enter, Escape, xóa lựa chọn/nội dung tìm kiếm, trạng thái không có kết quả và danh sách cuộn. Tạo `options` dạng `{ value, label, keywords? }`, truyền `value`, `onChange` và `ariaLabel`; giữ native `<select>` cho nhóm tùy chọn ngắn, cố định như phạm vi 3 lựa chọn hoặc mức ưu tiên 4 lựa chọn.
+
+### Kanban và Task Detail
+
+Kanban dùng `client/src/components/KanbanBoard.tsx`; card hiển thị mã task, dự án, ưu tiên, assignee, deadline, estimate và phần trăm subtask, hỗ trợ tìm nhanh/lọc assignee/priority/project cùng drag-drop có chỉ báo vùng thả. Modal `client/src/components/TaskModal.tsx` dùng layout nội dung + sidebar thuộc tính; nội dung được chia thành tab Chi tiết, Bình luận, Subtask, Lịch sử và Tệp đính kèm. Estimate, logged time, ngày bắt đầu, deadline, trạng thái, ưu tiên và assignee được thao tác từ sidebar; chỉ cho đổi ngày khi task ở To Do. Thay đổi metadata cần nhấn Lưu thay đổi. Mô tả là văn bản Markdown nhẹ, có nút chèn cấu trúc bold/code/checklist; tệp được xem trước, tải xuống hoặc xóa. Tệp hỗ trợ ảnh, PDF, văn bản và Word `.docx` (giới hạn và phân quyền giữ nguyên).
 
 ## Scripts hữu ích
 

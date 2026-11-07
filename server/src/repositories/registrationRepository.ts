@@ -64,12 +64,24 @@ export async function createVerifiedUser(email: string, expectedOtpHash: string)
       return null;
     }
     const [result] = await connection.query<ResultSetHeader>(
-      `INSERT INTO users (name, email, password, role, employee_code, job_title, department)
-       VALUES (?, ?, ?, 'member', ?, ?, ?)`,
-      [pending.name, pending.email, pending.password_hash, `TMP-${randomBytes(8).toString('hex')}`, pending.job_title, pending.department],
+      `INSERT INTO users (name, email, username, password, role, employee_code, job_title, department)
+       VALUES (?, ?, ?, ?, 'member', ?, ?, ?)`,
+      [
+        pending.name,
+        pending.email,
+        `TMP-${randomBytes(8).toString('hex')}`,
+        pending.password_hash,
+        `TMP-${randomBytes(8).toString('hex')}`,
+        pending.job_title,
+        pending.department,
+      ],
     );
     const employeeCode = `TMT-${String(result.insertId).padStart(3, '0')}`;
-    await connection.query('UPDATE users SET employee_code = ? WHERE id = ?', [employeeCode, result.insertId]);
+    const usernameBase = pending.email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 60) || 'user';
+    await connection.query(
+      'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
+      [employeeCode, `${usernameBase}-${result.insertId}`, result.insertId],
+    );
     await connection.query('DELETE FROM pending_registrations WHERE email = ?', [email]);
     const [users] = await connection.query<ManagedUserRow[]>(
       `SELECT id, name, email, role, employee_code, job_title, department,

@@ -10,6 +10,7 @@ import KanbanBoard from './components/KanbanBoard';
 import Dashboard from './components/Dashboard';
 import UserManagement from './pages/UserManagement';
 import ProjectManagement from './pages/ProjectManagement';
+import Sprints from './pages/Sprints';
 
 function Protected({ children }: { children: ReactNode }) {
   const { token, loading } = useAuth();
@@ -43,9 +44,11 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/kanban" element={<KanbanBoard/>} />
+        <Route path="/task" element={<Tasks />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/urgent" element={<Tasks urgentOnly />} />
         <Route path="/projects" element={<ProjectManagement />} />
+        <Route path="/sprints" element={<Sprints />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/users" element={<AdminOnly><UserManagement /></AdminOnly>} />
         

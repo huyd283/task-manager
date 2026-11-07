@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import toast from 'react-hot-toast';
 import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task } from '../types';
 import { useAuth } from '../context/AuthContext';
+import SearchableSelect from './common/SearchableSelect';
 import {
   CheckCircle2,
   Clock,
@@ -73,7 +74,9 @@ export default function Dashboard() {
 
   // 1. Tính toán KPI
   const totalTasks = tasks.length;
-  const completedTasks = tasks.filter((t) => t.status === 'DONE').length;
+  const completedTasks = tasks.filter((t) => t.status === 'GOLIVE').length;
+  const totalEstimatedHours = tasks.reduce((sum, task) => sum + (task.estimatedHours ?? 0), 0);
+  const totalLoggedHours = tasks.reduce((sum, task) => sum + task.loggedHours, 0);
   const inProgressTasks = tasks.filter((t) => t.status === 'IN_PROGRESS').length;
   const overdueTasks = tasks.filter(
     (t) => getDeadlineState(t.dueDate, t.status) === 'overdue'
@@ -89,6 +92,8 @@ export default function Dashboard() {
     TESTING: '#f59e0b',
     TEST_FAIL: '#f43f5e',
     DONE: '#10b981',
+    REVIEW: '#f59e0b',
+    GOLIVE: '#7c3aed',
     PENDING: '#f43f5e',
   };
 
@@ -107,7 +112,7 @@ export default function Dashboard() {
     const proj = t.project?.trim() || 'Khác';
     if (!projectMap[proj]) projectMap[proj] = { total: 0, done: 0 };
     projectMap[proj].total += 1;
-    if (t.status === 'DONE') projectMap[proj].done += 1;
+    if (t.status === 'GOLIVE') projectMap[proj].done += 1;
   });
 
   const barData = Object.keys(projectMap).map((proj) => ({
@@ -157,15 +162,21 @@ export default function Dashboard() {
             <option value="all">Toàn bộ dự án</option>
           </select>
           {filterMode === 'project' && (
-            <select
-              aria-label="Chọn dự án Dashboard"
+            <SearchableSelect
+              ariaLabel="Chọn dự án Dashboard"
               value={projectFilter}
-              onChange={(event) => setProjectFilter(event.target.value)}
-              className="max-w-64 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Chọn dự án...</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}
-            </select>
+              onChange={setProjectFilter}
+              placeholder="Chọn dự án..."
+              className="max-w-64"
+              options={[
+                { value: '', label: 'Chọn dự án...' },
+                ...projects.map((project) => ({
+                  value: String(project.id),
+                  label: `${project.code} · ${project.name}`,
+                  keywords: project.code,
+                })),
+              ]}
+            />
           )}
           <div className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-600">
             <Calendar size={15} className="text-blue-600" />
@@ -202,7 +213,7 @@ export default function Dashboard() {
           <h3 className="text-2xl font-extrabold text-emerald-600 mt-2">{completedTasks}</h3>
           <p className="text-[11px] text-emerald-600 font-bold mt-1 flex items-center gap-1">
             <TrendingUp size={13} />
-            <span>Đạt {completionRate}% tỷ lệ hoàn thành</span>
+            <span>Đạt {completionRate}% Golive</span>
           </p>
         </div>
 
@@ -228,6 +239,17 @@ export default function Dashboard() {
           </div>
           <h3 className="text-2xl font-extrabold text-rose-600 mt-2">{overdueTasks}</h3>
           <p className="text-[11px] text-rose-500 font-bold mt-1">Cần ưu tiên giải quyết gấp</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+          <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Tổng giờ dự tính</p>
+          <p className="mt-2 text-2xl font-extrabold text-blue-700">{totalEstimatedHours}h</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+          <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Tổng giờ đã ghi nhận</p>
+          <p className="mt-2 text-2xl font-extrabold text-indigo-700">{totalLoggedHours}h</p>
         </div>
       </div>
 

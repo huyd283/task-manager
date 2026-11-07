@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   id         INT AUTO_INCREMENT PRIMARY KEY,
   name       VARCHAR(120) NOT NULL,
   email      VARCHAR(190) NOT NULL UNIQUE,
+  username   VARCHAR(80) NULL UNIQUE,
   password   VARCHAR(255) NOT NULL,
   role       VARCHAR(30)  NOT NULL DEFAULT 'member',
   employee_code VARCHAR(20) NOT NULL UNIQUE,
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS projects (
   name        VARCHAR(160) NOT NULL UNIQUE,
   description TEXT NULL,
   status      ENUM('PLANNING','ACTIVE','ON_HOLD','COMPLETED') NOT NULL DEFAULT 'ACTIVE',
+  require_logged_time TINYINT(1) NOT NULL DEFAULT 0,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -48,6 +50,22 @@ CREATE TABLE IF NOT EXISTS project_members (
   CONSTRAINT fk_project_members_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS sprints (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  project_id INT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  goal TEXT NULL,
+  status ENUM('PLANNING','ACTIVE','COMPLETED') NOT NULL DEFAULT 'PLANNING',
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sprints_project_status (project_id, status),
+  CONSTRAINT fk_sprints_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+  CONSTRAINT fk_sprints_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tasks (
   id             INT AUTO_INCREMENT PRIMARY KEY,
   task_code      VARCHAR(40)  NOT NULL UNIQUE,
@@ -55,7 +73,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   project_id     INT NOT NULL,
   title          VARCHAR(255) NOT NULL,
   description    TEXT         NULL,
-  status         ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING') NOT NULL DEFAULT 'TODO',
+  status         ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING') NOT NULL DEFAULT 'TODO',
   priority       ENUM('LOW','MEDIUM','HIGH','URGENT') NOT NULL DEFAULT 'MEDIUM',
   assignee_user_id INT        NULL,
   assignee       VARCHAR(120) NULL,
@@ -63,6 +81,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   estimated_date DATE         NULL,
   due_date       DATE         NULL,
   actual_date    DATE         NULL,
+  estimated_time DECIMAL(8,2) NULL,
+  logged_hours DECIMAL(8,2) NOT NULL DEFAULT 0,
+  golive_date DATE NULL,
+  acceptance_notes TEXT NULL,
+  sprint_id INT NULL,
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_tasks_status (status),
@@ -72,7 +95,35 @@ CREATE TABLE IF NOT EXISTS tasks (
   CONSTRAINT fk_tasks_assignee_user FOREIGN KEY (assignee_user_id)
     REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_tasks_project FOREIGN KEY (project_id)
-    REFERENCES projects (id) ON DELETE RESTRICT ON UPDATE CASCADE
+    REFERENCES projects (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_tasks_sprint FOREIGN KEY (sprint_id)
+    REFERENCES sprints (id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS task_comments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  task_id INT NOT NULL,
+  user_id INT NULL,
+  body MEDIUMTEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_comments_task_created (task_id, created_at),
+  CONSTRAINT fk_task_comments_task FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+  CONSTRAINT fk_task_comments_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS task_subtasks (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  task_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  assignee_user_id INT NULL,
+  status ENUM('TODO','IN_PROGRESS','DONE') NOT NULL DEFAULT 'TODO',
+  estimated_hours DECIMAL(8,2) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_task_subtasks_parent_status (task_id, status),
+  CONSTRAINT fk_task_subtasks_task FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+  CONSTRAINT fk_task_subtasks_assignee FOREIGN KEY (assignee_user_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS task_assignees (

@@ -1,7 +1,7 @@
 import mysql, { type RowDataPacket } from 'mysql2/promise';
 import { env } from '../config/env';
 
-const FINAL_STATUS_ENUM = "enum('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING')";
+const FINAL_STATUS_ENUM = "enum('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING')";
 const LEGACY_STATUS_ENUM =
   "enum('TODO','IN_PROGRESS','IN_REVIEW','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING')";
 
@@ -38,7 +38,7 @@ export async function migrateTaskWorkflow(): Promise<void> {
     if (statusColumnType !== FINAL_STATUS_ENUM.toLowerCase()) {
       await connection.query(
         `ALTER TABLE tasks
-         MODIFY status ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING')
+         MODIFY status ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING')
          NOT NULL DEFAULT 'TODO'`,
       );
     }

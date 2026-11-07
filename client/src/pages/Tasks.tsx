@@ -5,6 +5,7 @@ import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   STATUS_META,
+  STATUS_TRANSITIONS,
   PRIORITY_META,
   getDeadlineState,
   getTaskPriority,
@@ -14,9 +15,34 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '../types';
-import { Plus, Filter, Edit3, Trash2, Calendar, Folder, AlertCircle } from 'lucide-react';
+import {
+  Plus,
+  Edit3,
+  Trash2,
+  Calendar,
+  Folder,
+  AlertCircle,
+  AlertTriangle,
+  Clock3,
+  PlayCircle,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
+import SearchableSelect from '../components/common/SearchableSelect';
+
+type AlertFilter = 'overdue' | 'soon' | 'not-started';
+type TaskSortField = 'taskCode' | 'title' | 'startDate' | 'dueDate';
+
+function formatTaskDate(value: string | null) {
+  if (!value) return '-';
+  const [year, month, day] = value.slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : '-';
+}
 
 export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -25,9 +51,16 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>('');
+  const [alertFilter, setAlertFilter] = useState<AlertFilter | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [sortField, setSortField] = useState<TaskSortField>('taskCode');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | ''>('');
+  const [dueFrom, setDueFrom] = useState('');
+  const [dueTo, setDueTo] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
@@ -38,10 +71,11 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
     try {
       const res = await api.get('/tasks', {
         params: {
-          ...(statusFilter ? { status: statusFilter } : {}),
           ...(assigneeFilter ? { assigneeId: assigneeFilter } : {}),
           ...(projectFilter ? { projectId: projectFilter } : {}),
           ...(priorityFilter ? { priority: priorityFilter } : {}),
+          ...(dueFrom ? { dueFrom } : {}),
+          ...(dueTo ? { dueTo } : {}),
         },
       });
       setTasks(res.data.data);
@@ -54,23 +88,39 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
     } finally {
       setLoading(false);
     }
-  }, [assigneeFilter, priorityFilter, projectFilter, statusFilter]);
+  }, [assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter]);
 
   useEffect(() => {
     Promise.all([
       api.get<{ data: Project[] }>('/projects'),
-      api.get<{ data: AssignableUser[] }>('/users/options'),
     ])
-      .then(([projectResponse, assigneeResponse]) => {
+      .then(([projectResponse]) => {
         setProjects(projectResponse.data.data ?? []);
-        setAssignees(assigneeResponse.data.data ?? []);
       })
-      .catch(() => toast.error('Không tải được dữ liệu bộ lọc dự án và nhân sự.'));
+      .catch(() => toast.error('Không tải được danh sách dự án cho bộ lọc.'));
   }, []);
+
+  useEffect(() => {
+    setAssigneeFilter('');
+    if (!projectFilter) {
+      setAssignees([]);
+      return;
+    }
+    api.get<{ data: AssignableUser[] }>(`/projects/${projectFilter}/members/options`)
+      .then((response) => setAssignees(response.data.data ?? []))
+      .catch(() => {
+        setAssignees([]);
+        toast.error('Không tải được thành viên của dự án đã chọn.');
+      });
+  }, [projectFilter]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [alertFilter, assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter, searchText, statusFilter]);
 
   const changeStatus = async (task: Task, status: TaskStatus) => {
     // Optimistic update
@@ -110,9 +160,93 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
     setModalOpen(true);
   };
 
-  const visibleTasks = urgentOnly
-    ? tasks.filter((task) => getDeadlineState(task.dueDate, task.status) !== null)
-    : tasks;
+  const normalizedSearch = searchText.trim().toLocaleLowerCase();
+  const searchableTasks = tasks.filter((task) => {
+    const matchesSearch = !normalizedSearch || [
+      task.taskCode,
+      task.title,
+      task.description,
+      task.project,
+      task.assignee,
+      ...(task.assignees ?? []),
+    ].some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
+    return matchesSearch && (!urgentOnly || getDeadlineState(task.dueDate, task.status) !== null);
+  });
+  const statusCounts = new Map(
+    TASK_STATUSES.map((status) => [
+      status,
+      searchableTasks.filter((task) => task.status === status).length,
+    ]),
+  );
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const isNotStarted = (task: Task) =>
+    task.status === 'TODO' && Boolean(task.startDate && task.startDate.slice(0, 10) <= today);
+  const alertGroups = [
+    {
+      id: 'overdue' as const,
+      title: 'Task quá hạn',
+      description: 'Đã quá hạn nhưng chưa hoàn thành',
+      icon: AlertTriangle,
+      style: 'border-rose-200 bg-rose-50 text-rose-700',
+      countStyle: 'bg-rose-100 text-rose-700',
+      tasks: searchableTasks.filter((task) => getDeadlineState(task.dueDate, task.status) === 'overdue'),
+    },
+    {
+      id: 'soon' as const,
+      title: 'Task sắp đến hạn',
+      description: 'Đến hạn trong 24 giờ tới',
+      icon: Clock3,
+      style: 'border-amber-200 bg-amber-50 text-amber-800',
+      countStyle: 'bg-amber-100 text-amber-800',
+      tasks: searchableTasks.filter((task) => getDeadlineState(task.dueDate, task.status) === 'soon'),
+    },
+    {
+      id: 'not-started' as const,
+      title: 'Task chưa bắt đầu',
+      description: 'Đã đến ngày bắt đầu nhưng vẫn ở To Do',
+      icon: PlayCircle,
+      style: 'border-blue-200 bg-blue-50 text-blue-700',
+      countStyle: 'bg-blue-100 text-blue-700',
+      tasks: searchableTasks.filter(isNotStarted),
+    },
+  ].filter((group) => group.tasks.length > 0);
+  const alertTotal = new Set(alertGroups.flatMap((group) => group.tasks.map((task) => task.id))).size;
+  const matchesAlert = (task: Task) => {
+    if (alertFilter === 'overdue') return getDeadlineState(task.dueDate, task.status) === 'overdue';
+    if (alertFilter === 'soon') return getDeadlineState(task.dueDate, task.status) === 'soon';
+    if (alertFilter === 'not-started') return isNotStarted(task);
+    return true;
+  };
+  const matchingTasks = searchableTasks.filter((task) =>
+    (!statusFilter || task.status === statusFilter) &&
+    matchesAlert(task),
+  );
+  const sortedTasks = [...matchingTasks].sort((a, b) => {
+    const first = a[sortField] ?? '';
+    const second = b[sortField] ?? '';
+    if (!first && second) return 1;
+    if (first && !second) return -1;
+    const result = String(first).localeCompare(String(second), undefined, { numeric: true, sensitivity: 'base' });
+    return sortDirection === 'asc' ? result : -result;
+  });
+  const pageSize = 20;
+  const pageCount = Math.max(1, Math.ceil(sortedTasks.length / pageSize));
+  const page = Math.min(currentPage, pageCount);
+  const visibleTasks = sortedTasks.slice((page - 1) * pageSize, page * pageSize);
+
+  const sortBy = (field: TaskSortField) => {
+    if (sortField === field) {
+      setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'taskCode' ? 'desc' : 'asc');
+    }
+  };
+  const renderSortIndicator = (field: TaskSortField) => {
+    if (sortField !== field) return null;
+    return sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />;
+  };
 
   // Helper render màu badge trạng thái sống động
   const renderStatusBadge = (status: TaskStatus) => {
@@ -123,6 +257,8 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
       TESTING: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200/60', dot: 'bg-amber-500' },
       TEST_FAIL: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200/60', dot: 'bg-rose-500' },
       DONE: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200/60', dot: 'bg-emerald-500' },
+      REVIEW: { bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-200/60', dot: 'bg-amber-500' },
+      GOLIVE: { bg: 'bg-purple-50', text: 'text-purple-800', border: 'border-purple-200/60', dot: 'bg-purple-600' },
       PENDING: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200/60', dot: 'bg-rose-500' },
     };
 
@@ -146,7 +282,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
             {urgentOnly ? 'Công việc gấp' : 'Công việc'}
             <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-600 rounded-full border border-blue-100">
-              {visibleTasks.length}
+              {matchingTasks.length}
             </span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
@@ -156,39 +292,47 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
 
         <div className="flex flex-wrap items-center gap-3">
           {/* Bộ lọc danh sách task */}
-          <div className="relative">
-            <select
-              className="pl-3 pr-8 py-2 text-xs font-semibold bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all shadow-sm"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as TaskStatus | '')}
-            >
-              <option value="">Tất cả trạng thái</option>
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_META[s].label}
-                </option>
-              ))}
-            </select>
-            <Filter size={14} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
-          </div>
-          <select
-            aria-label="Lọc theo người phụ trách"
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+          <label className="relative min-w-48 flex-1 sm:flex-none">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              aria-label="Tìm kiếm công việc"
+              placeholder="Tìm công việc..."
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-xs font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <SearchableSelect
+            ariaLabel="Lọc theo người phụ trách"
+            className="min-w-48 bg-slate-50"
+            placeholder={projectFilter ? 'Tất cả thành viên dự án' : 'Chọn dự án trước'}
             value={assigneeFilter}
-            onChange={(event) => setAssigneeFilter(event.target.value)}
-          >
-            <option value="">Tất cả thành viên</option>
-            {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
-          </select>
-          <select
-            aria-label="Lọc theo dự án"
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            onChange={setAssigneeFilter}
+            disabled={!projectFilter}
+            options={[
+              { value: '', label: 'Tất cả thành viên dự án' },
+              ...assignees.map((assignee) => ({
+                value: String(assignee.id),
+                label: assignee.name,
+                keywords: `${assignee.email} ${assignee.username ?? ''} ${assignee.employeeCode}`,
+              })),
+            ]}
+          />
+          <SearchableSelect
+            ariaLabel="Lọc theo dự án"
+            className="min-w-40 bg-slate-50"
+            placeholder="Tất cả dự án"
             value={projectFilter}
-            onChange={(event) => setProjectFilter(event.target.value)}
-          >
-            <option value="">Tất cả dự án</option>
-            {projects.map((project) => <option key={project.id} value={project.id}>{project.code}</option>)}
-          </select>
+            onChange={setProjectFilter}
+            options={[
+              { value: '', label: 'Tất cả dự án' },
+              ...projects.map((project) => ({
+                value: String(project.id),
+                label: `${project.code} · ${project.name}`,
+                keywords: project.code,
+              })),
+            ]}
+          />
           <select
             aria-label="Lọc theo mức độ ưu tiên"
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
@@ -198,6 +342,8 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
             <option value="">Mọi mức ưu tiên</option>
             {TASK_PRIORITIES.map((priority) => <option key={priority} value={priority}>{PRIORITY_META[priority].label}</option>)}
           </select>
+          <input aria-label="Hạn chót từ" type="date" value={dueFrom} onChange={(event) => setDueFrom(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700" />
+          <input aria-label="Hạn chót đến" type="date" value={dueTo} onChange={(event) => setDueTo(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700" />
 
           {/* Nút Tạo mới với hiệu ứng Shadow Gradient */}
           <button
@@ -218,45 +364,122 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
         </div>
       )}
 
+      <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
+          <h2 className="text-sm font-extrabold text-slate-900">Cần xử lý</h2>
+          <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${alertTotal > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+            {alertTotal} việc cần chú ý
+          </span>
+        </div>
+        {alertGroups.length === 0 ? (
+          <p className="px-5 py-3 text-xs font-medium text-slate-500">Không có công việc cần xử lý theo các bộ lọc hiện tại.</p>
+        ) : (
+          <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
+            {alertGroups.map((group) => {
+              const Icon = group.icon;
+              const active = alertFilter === group.id;
+              return (
+                <button
+                  type="button"
+                  key={group.id}
+                  aria-pressed={active}
+                  onClick={() => {
+                    setStatusFilter('');
+                    setAlertFilter((current) => current === group.id ? null : group.id);
+                  }}
+                  className={`flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition-colors ${group.style} ${active ? 'ring-2 ring-current ring-offset-1' : 'hover:brightness-[0.98]'}`}
+                >
+                  <Icon size={18} className="shrink-0" />
+                  <span className={`flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-extrabold ${group.countStyle}`}>{group.tasks.length}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-extrabold">{group.title}</span>
+                    <span className="mt-0.5 block truncate text-[10px] opacity-80">{group.description}</span>
+                  </span>
+                  <ChevronRight size={15} className="shrink-0 opacity-60" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-2 shadow-sm">
+        <div className="searchable-select-scrollbar flex gap-1 overflow-x-auto">
+          <button
+            type="button"
+            aria-pressed={!statusFilter && !alertFilter}
+            onClick={() => {
+              setStatusFilter('');
+              setAlertFilter(null);
+            }}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition-colors ${!statusFilter && !alertFilter ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            Tất cả <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${!statusFilter && !alertFilter ? 'bg-white/15' : 'bg-slate-100 text-slate-500'}`}>{searchableTasks.length}</span>
+          </button>
+          {TASK_STATUSES.map((status) => {
+            const active = statusFilter === status && !alertFilter;
+            return (
+              <button
+                type="button"
+                key={status}
+                aria-pressed={active}
+                onClick={() => {
+                  setAlertFilter(null);
+                  setStatusFilter((current) => current === status ? '' : status);
+                }}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition-colors ${active ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                {STATUS_META[status].label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{statusCounts.get(status) ?? 0}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 2. Bảng Dữ liệu */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1325px] table-fixed border-collapse text-left">
+          <table className="w-full min-w-[1450px] table-fixed border-collapse text-left">
             <colgroup>
               <col className="w-[95px]" />
-              <col className="w-[300px]" />
-              <col className="w-[175px]" />
-              <col className="w-[185px]" />
-              <col className="w-[110px]" />
-              <col className="w-[155px]" />
-              <col className="w-[215px]" />
+              <col className="w-[250px]" />
+              <col className="w-[145px]" />
+              <col className="w-[160px]" />
+              <col className="w-[100px]" />
+              <col className="w-[150px]" />
+              <col className="w-[105px]" />
+              <col className="w-[200px]" />
+              <col className="w-[85px]" />
               <col className="w-[90px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                <th className="whitespace-nowrap px-3 py-3.5">Mã</th>
-                <th className="px-4 py-3.5">Tiêu đề</th>
+                <th className="whitespace-nowrap px-3 py-3.5"><button type="button" onClick={() => sortBy('taskCode')} className="inline-flex items-center gap-1">Mã {renderSortIndicator('taskCode')}</button></th>
+                <th className="px-4 py-3.5"><button type="button" onClick={() => sortBy('title')} className="inline-flex items-center gap-1">Tiêu đề {renderSortIndicator('title')}</button></th>
                 <th className="px-3 py-3.5">Dự án</th>
                 <th className="px-3 py-3.5">Phụ trách</th>
                 <th className="px-3 py-3.5">Ưu tiên</th>
                 <th className="px-3 py-3.5">Trạng thái</th>
-                <th className="whitespace-nowrap px-3 py-3.5">Hạn chót</th>
+                <th className="whitespace-nowrap px-3 py-3.5"><button type="button" onClick={() => sortBy('startDate')} className="inline-flex items-center gap-1">Bắt đầu {renderSortIndicator('startDate')}</button></th>
+                <th className="whitespace-nowrap px-3 py-3.5"><button type="button" onClick={() => sortBy('dueDate')} className="inline-flex items-center gap-1">Dự kiến hoàn thành {renderSortIndicator('dueDate')}</button></th>
+                <th className="whitespace-nowrap px-3 py-3.5">Est. / Logged</th>
                 <th className="whitespace-nowrap px-3 py-3.5 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2 font-medium">
                       <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       <span>Đang tải dữ liệu...</span>
                     </div>
                   </td>
                 </tr>
-              ) : visibleTasks.length === 0 ? (
+              ) : sortedTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400 font-medium">
+                  <td colSpan={10} className="py-12 text-center text-slate-400 font-medium">
                     Chưa có công việc nào trong danh sách
                   </td>
                 </tr>
@@ -285,6 +508,9 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                       </div>
                       {task.description && (
                         <div title={task.description} className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{task.description}</div>
+                      )}
+                      {task.subtaskProgress > 0 && (
+                        <div className="mt-1 text-[10px] font-semibold text-indigo-600">Subtask {task.subtaskProgress}%</div>
                       )}
                     </td>
 
@@ -324,18 +550,23 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                     {/* Trạng thái Select */}
                     <td className="px-3 py-3.5 align-middle">
                       <div className="relative block">
-                        <select
-                          value={task.status}
-                          onChange={(e) => changeStatus(task, e.target.value as TaskStatus)}
-                          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-bold text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-100 focus:ring-2 focus:ring-blue-500"
-                        >
-                          {TASK_STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {STATUS_META[s].label}
-                            </option>
-                          ))}
-                        </select>
+                        <div onClick={(event) => event.stopPropagation()}>
+                          <SearchableSelect
+                            ariaLabel={`Trạng thái ${task.taskCode}`}
+                            value={task.status}
+                            onChange={(value) => void changeStatus(task, value as TaskStatus)}
+                            className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] font-bold"
+                            options={[task.status, ...STATUS_TRANSITIONS[task.status]].map((status) => ({
+                              value: status,
+                              label: STATUS_META[status].label,
+                            }))}
+                          />
+                        </div>
                       </div>
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-3.5 align-middle font-semibold text-slate-600">
+                      {formatTaskDate(task.startDate)}
                     </td>
 
                     {/* Hạn chót */}
@@ -354,7 +585,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                                 : 'text-slate-600'
                           }`}
                         >
-                          {task.dueDate ?? '—'}
+                          {formatTaskDate(task.dueDate)}
                         </span>
                         {deadlineState && (
                           <span className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
@@ -364,6 +595,10 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                           </span>
                         )}
                       </div>
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-3.5 align-middle font-semibold text-slate-600">
+                      {task.estimatedHours == null ? '—' : `${task.estimatedHours}h`} / {task.loggedHours}h
                     </td>
 
                     {/* Thao tác */}
@@ -396,14 +631,23 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
         {/* Footer Phân trang */}
         <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between text-xs text-slate-500">
           <span>
-            Hiển thị <strong className="text-slate-700">{visibleTasks.length}</strong> công việc
+            {sortedTasks.length === 0 ? 'Không có công việc' : `Hiển thị ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, sortedTasks.length)} / ${sortedTasks.length} công việc`}
           </span>
           <div className="flex gap-1.5">
-            <button className="px-3 py-1 border border-slate-200 rounded-lg bg-white text-slate-400 cursor-not-allowed font-medium" disabled>
-              Trước
+            <button
+              onClick={() => setCurrentPage((current) => Math.max(1, current - 1))}
+              className="inline-flex items-center gap-1 px-3 py-1 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 font-medium"
+              disabled={page <= 1}
+            >
+              <ChevronLeft size={13} /> Trước
             </button>
-            <button className="px-3 py-1 border border-slate-200 rounded-lg bg-white text-slate-700 hover:bg-slate-50 font-semibold shadow-sm">
-              Sau
+            <span className="px-2 py-1 font-semibold text-slate-500">{page} / {pageCount}</span>
+            <button
+              onClick={() => setCurrentPage((current) => Math.min(pageCount, current + 1))}
+              className="inline-flex items-center gap-1 px-3 py-1 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 font-medium"
+              disabled={page >= pageCount}
+            >
+              Sau <ChevronRight size={13} />
             </button>
           </div>
         </div>

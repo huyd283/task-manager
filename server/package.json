@@ -13,7 +13,8 @@
     "db:migrate:task-assignees": "tsx src/scripts/migrateTaskAssignees.ts",
     "db:migrate:projects": "tsx src/scripts/migrateProjects.ts",
     "db:migrate:registration-otp": "tsx src/scripts/migrateRegistrationOtp.ts",
-    "db:migrate:task-workflow": "tsx src/scripts/migrateTaskWorkflow.ts"
+    "db:migrate:task-workflow": "tsx src/scripts/migrateTaskWorkflow.ts",
+    "db:migrate:task-features": "tsx src/scripts/migrateTaskFeatures.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

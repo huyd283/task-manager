@@ -75,6 +75,9 @@ async function main() {
 
   // 3. Reset existing data so the seed is idempotent
   await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+  await connection.query('TRUNCATE TABLE task_comments');
+  await connection.query('TRUNCATE TABLE task_subtasks');
+  await connection.query('TRUNCATE TABLE sprints');
   await connection.query('TRUNCATE TABLE task_history');
   await connection.query('TRUNCATE TABLE task_attachments');
   await connection.query('TRUNCATE TABLE task_assignees');
@@ -87,13 +90,14 @@ async function main() {
   // 4. Seed users (all share the same demo password)
   const passwordHash = await bcrypt.hash(SEED_PASSWORD, 10);
   for (const [index, [name, email, role]] of USERS.entries()) {
-    await connection.query(
+    const [result] = await connection.query<mysql.ResultSetHeader>(
       `INSERT INTO users
-         (name, email, password, role, employee_code, job_title, department)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (name, email, username, password, role, employee_code, job_title, department)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         email,
+        `seed-${index + 1}`,
         passwordHash,
         role,
         `NV-${String(index + 1).padStart(5, '0')}`,
@@ -101,6 +105,8 @@ async function main() {
         'Phát triển Phần mềm',
       ],
     );
+    const usernameBase = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 60) || 'user';
+    await connection.query('UPDATE users SET username = ? WHERE id = ?', [`${usernameBase}-${result.insertId}`, result.insertId]);
   }
   console.log(`✓ Seeded ${USERS.length} users (password for all: "${SEED_PASSWORD}")`);
 

@@ -2,11 +2,14 @@ import { createApp } from './app';
 import { assertDbConnection } from './config/db';
 import { env } from './config/env';
 import { migrateTaskWorkflow } from './utils/taskWorkflowMigration';
+import { migrateTaskFeatures } from './utils/taskFeaturesMigration';
 
 async function main() {
   try {
     await migrateTaskWorkflow();
     console.log('✓ Task workflow database is up to date');
+    await migrateTaskFeatures();
+    console.log('✓ Task feature database is up to date');
     await assertDbConnection();
     console.log('✓ Connected to MySQL');
   } catch (err) {

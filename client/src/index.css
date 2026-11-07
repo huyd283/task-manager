@@ -5,3 +5,18 @@
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
+
+.searchable-select-scrollbar {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.searchable-select-scrollbar::-webkit-scrollbar {
+  width: 7px;
+}
+
+.searchable-select-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: #cbd5e1;
+}
