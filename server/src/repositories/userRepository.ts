@@ -17,6 +17,7 @@ export interface UserRow extends RowDataPacket {
   is_active: number;
   partner_user_id: number | null;
   partner_status: string | null;
+  is_acc_admin: number;
   created_at: string;
   updated_at: string;
 }
@@ -127,7 +128,7 @@ export async function upsertCheckinEmployee(
       `UPDATE users
        SET email = ?, name = ?, username = COALESCE(?, username),
            job_title = COALESCE(?, job_title), department = COALESCE(?, department),
-           partner_user_id = ?, partner_status = ?, is_active = ?
+           partner_user_id = ?, partner_status = ?, is_active = ?, is_acc_admin = ?
        WHERE id = ?`,
       [
         employee.email,
@@ -138,6 +139,7 @@ export async function upsertCheckinEmployee(
         employee.userId,
         employee.status,
         isActive,
+        employee.isAccAdmin ? 1 : 0,
         existing.id,
       ],
     );
@@ -154,8 +156,8 @@ export async function upsertCheckinEmployee(
     const [result] = await connection.query<ResultSetHeader>(
       `INSERT INTO users
          (name, email, username, password, role, employee_code, job_title, department,
-          is_active, partner_user_id, partner_status)
-       VALUES (?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?)`,
+          is_active, partner_user_id, partner_status, is_acc_admin)
+       VALUES (?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?, ?)`,
       [
         employee.name,
         employee.email,
@@ -167,6 +169,7 @@ export async function upsertCheckinEmployee(
         isActive,
         employee.userId,
         employee.status,
+        employee.isAccAdmin ? 1 : 0,
       ],
     );
     await connection.query(

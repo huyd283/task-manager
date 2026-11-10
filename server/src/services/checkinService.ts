@@ -5,6 +5,7 @@ import { HttpError } from '../middleware/errorHandler';
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EMPLOYEE_PAGES = 10_000;
 const EMPLOYEE_ENDPOINT = '/api/v1/internal/employees';
+const NOTIFICATION_SEND_ENDPOINT = '/api/v1/internal/notifications/send';
 
 export interface CheckinEmployee {
   userId: number;
@@ -14,6 +15,7 @@ export interface CheckinEmployee {
   status: string;
   jobTitle: string | null;
   department: string | null;
+  isAccAdmin: boolean;
 }
 
 export interface CheckinEmployeePageOptions {
@@ -90,6 +92,12 @@ function summarizeResponse(path: string, payload: unknown): unknown {
         ...(typeof metadata.hasNextPage === 'boolean' ? { hasNextPage: metadata.hasNextPage } : {}),
       };
     }
+  } else if (path.endsWith('/notifications/send') && isRecord(payload.data)) {
+    summary.data = {
+      ...(typeof payload.data.requested === 'number' ? { requested: payload.data.requested } : {}),
+      ...(typeof payload.data.sent === 'number' ? { sent: payload.data.sent } : {}),
+      ...(typeof payload.data.failed === 'number' ? { failed: payload.data.failed } : {}),
+    };
   } else if (isRecord(payload.data)) {
     const { verified, status, userId } = payload.data;
     summary.data = {
@@ -215,6 +223,30 @@ export async function verifyCheckinCredentials(username: string, password: strin
   return { verified: data.verified, status, userId };
 }
 
+export async function sendNotificationToCheckin(input: {
+  userIds: number[];
+  title: string;
+  body: string;
+  data: Record<string, string>;
+}): Promise<unknown> {
+  const clientMessageId = uuidV7();
+  console.info('[Checkin request]', JSON.stringify({
+    method: 'POST',
+    endpoint: NOTIFICATION_SEND_ENDPOINT,
+    clientMessageId,
+    recipientCount: input.userIds.length,
+  }));
+  const response = await requestCheckin(
+    NOTIFICATION_SEND_ENDPOINT,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    { clientMessageId },
+  );
+  return response.data;
+}
+
 function parseEmployee(value: unknown): CheckinEmployee | null {
   if (!isRecord(value)) {
     throw new HttpError(502, 'Checkin employee list contains an invalid record');
@@ -254,6 +286,7 @@ function parseEmployee(value: unknown): CheckinEmployee | null {
     department: typeof (value.department ?? value.departmentName) === 'string'
       ? String(value.department ?? value.departmentName).trim().slice(0, 80) || null
       : null,
+    isAccAdmin: isSystemAdmin(value.isAccAdmin),
   };
 }
 

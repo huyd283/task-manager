@@ -19,6 +19,7 @@ import {
   FolderKanban,
   AlarmClock,
   Timer,
+  BellRing,
 } from "lucide-react";
 import logoFull from "../assets/img/logo/logo.jpg";
 import logoSmall from "../assets/img/logo/logo-small.jpg";
@@ -27,6 +28,7 @@ import toast from "react-hot-toast";
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user?.role.toLowerCase() === "admin";
 
   // State quản lý Sidebar mobile & Submenu
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -272,11 +274,23 @@ export default function Layout() {
             </NavLink>
 
             {/* Menu Quản lý nhân sự */}
-            {user?.role === 'admin' && (
+            {isAdmin && (
               <NavLink to="/users" className={navItemClass}>
                 <Users size={18} className="shrink-0" />
                 {isSidebarOpen && <span>Quản lý nhân sự</span>}
               </NavLink>
+            )}
+            {isAdmin && (
+              <>
+                <NavLink to="/notifications" className={navItemClass}>
+                  <BellRing size={18} className="shrink-0" />
+                  {isSidebarOpen && <span>Thông báo</span>}
+                </NavLink>
+                <NavLink to="/employees" className={navItemClass}>
+                  <UserCheck size={18} className="shrink-0" />
+                  {isSidebarOpen && <span>Nhân sự Checkin</span>}
+                </NavLink>
+              </>
             )}
           </div>
 

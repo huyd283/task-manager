@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api/client';
-import type { Project, Task } from '../types';
+import { PRIORITY_META, STATUS_META, type Project, type Task } from '../types';
 import toast from 'react-hot-toast';
 import SearchableSelect from '../components/common/SearchableSelect';
+import { Flag, Search } from 'lucide-react';
 
 interface Sprint {
   id: number;
@@ -21,6 +22,7 @@ export default function Sprints() {
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedSprint, setSelectedSprint] = useState('');
+  const [backlogSearch, setBacklogSearch] = useState('');
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -103,6 +105,12 @@ export default function Sprints() {
   };
 
   const backlog = tasks.filter((task) => task.sprintId === null);
+  const filteredBacklog = backlog.filter((task) => {
+    const query = backlogSearch.trim().toLocaleLowerCase();
+    return !query || [task.taskCode, task.title, task.assignee, ...(task.assignees ?? [])]
+      .some((value) => value?.toLocaleLowerCase().includes(query));
+  });
+  const sprintTasks = tasks.filter((task) => task.sprintId !== null && task.status !== 'DONE');
 
   return (
     <div className="space-y-6">
@@ -168,7 +176,10 @@ export default function Sprints() {
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-lg font-bold text-slate-800">Backlog</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-800">Backlog</h2>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">{filteredBacklog.length}</span>
+            </div>
             {sprints.some((sprint) => sprint.status === 'PLANNING' || sprint.status === 'ACTIVE') && (
               <SearchableSelect
                 ariaLabel="Chọn Sprint để nhận task"
@@ -182,18 +193,50 @@ export default function Sprints() {
                 ]}
               />
             )}
-            {backlog.length === 0 ? <p className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-400">Backlog trống.</p> :
-              backlog.map((task) => (
-                <article key={task.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-800">{task.title}</p>
-                    <p className="text-xs text-slate-400">{task.taskCode} · {task.estimatedHours ?? 0}h</p>
-                  </div>
-                  <button disabled={!selectedSprint} onClick={() => void assignTask(task.id, selectedSprint)} className="rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 disabled:opacity-40">Thêm</button>
-                </article>
-              ))}
+            <label className="relative block">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={backlogSearch}
+                onChange={(event) => setBacklogSearch(event.target.value)}
+                aria-label="Tìm kiếm task trong Backlog"
+                placeholder="Tìm theo mã, tiêu đề hoặc người phụ trách..."
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+              />
+            </label>
+            <div className="searchable-select-scrollbar max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+              {filteredBacklog.length === 0 ? (
+                <p className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-400">
+                  {backlog.length ? 'Không tìm thấy task phù hợp.' : 'Backlog trống.'}
+                </p>
+              ) : filteredBacklog.map((task) => {
+                const assignees = task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : [];
+                return (
+                  <article key={task.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm border-2 border-blue-500" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800">{task.title}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
+                        <span className="font-mono">{task.taskCode}</span>
+                        <span>{STATUS_META[task.status].label}</span>
+                        <span className="inline-flex items-center gap-1"><Flag size={10} />{PRIORITY_META[task.priority].label}</span>
+                        {assignees.length > 0 && (
+                          <span className="inline-flex min-w-0 items-center gap-1.5" title={assignees.join(', ')}>
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[9px] font-bold text-indigo-700">
+                              {assignees[0].charAt(0).toUpperCase()}
+                            </span>
+                            <span className="truncate">{assignees.length > 1 ? `${assignees[0]} +${assignees.length - 1}` : assignees[0]}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button disabled={!selectedSprint} onClick={() => void assignTask(task.id, selectedSprint)} className="shrink-0 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 disabled:opacity-40">Thêm</button>
+                  </article>
+                );
+              })}
+            </div>
             <h3 className="pt-3 text-sm font-bold text-slate-700">Task trong Sprint</h3>
-            {tasks.filter((task) => task.sprintId !== null).map((task) => (
+            <div className="searchable-select-scrollbar max-h-[40vh] space-y-2 overflow-y-auto pr-1">
+            {sprintTasks.map((task) => (
               <article key={task.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">{task.title}</p>
@@ -202,6 +245,8 @@ export default function Sprints() {
                 <button onClick={() => void moveToBacklog(task)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Backlog</button>
               </article>
             ))}
+            {sprintTasks.length === 0 && <p className="rounded-xl border border-dashed p-5 text-center text-sm text-slate-400">Không có task đang mở trong Sprint.</p>}
+            </div>
           </section>
         </div>
       )}

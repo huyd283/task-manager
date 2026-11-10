@@ -11,6 +11,8 @@ import Dashboard from './components/Dashboard';
 import UserManagement from './pages/UserManagement';
 import ProjectManagement from './pages/ProjectManagement';
 import Sprints from './pages/Sprints';
+import NotificationManagement from './pages/NotificationManagement';
+import EmployeeSyncManagement from './pages/EmployeeSyncManagement';
 
 function Protected({ children }: { children: ReactNode }) {
   const { token, loading } = useAuth();
@@ -25,7 +27,7 @@ function Protected({ children }: { children: ReactNode }) {
 
 function AdminOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  return user?.role === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />;
+  return user?.role.toLowerCase() === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
@@ -51,7 +53,8 @@ export default function App() {
         <Route path="/sprints" element={<Sprints />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/users" element={<AdminOnly><UserManagement /></AdminOnly>} />
-        
+        <Route path="/notifications" element={<AdminOnly><NotificationManagement /></AdminOnly>} />
+        <Route path="/employees" element={<AdminOnly><EmployeeSyncManagement /></AdminOnly>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

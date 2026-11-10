@@ -34,6 +34,7 @@ import {
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 import SearchableSelect from '../components/common/SearchableSelect';
+import { useAuth } from '../context/AuthContext';
 
 type AlertFilter = 'overdue' | 'soon' | 'not-started';
 type TaskSortField = 'taskCode' | 'title' | 'startDate' | 'dueDate';
@@ -45,6 +46,8 @@ function formatTaskDate(value: string | null) {
 }
 
 export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
@@ -123,6 +126,10 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   }, [alertFilter, assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter, searchText, statusFilter]);
 
   const changeStatus = async (task: Task, status: TaskStatus) => {
+    if (status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS' && (!task.startDate || !task.dueDate)) {
+      toast.error('Hãy điền ngày bắt đầu và hạn chót trước khi chuyển task sang Đang thực hiện.');
+      return;
+    }
     // Optimistic update
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status } : t)));
     const toastId = toast.loading('Đang cập nhật trạng thái...');
@@ -611,13 +618,15 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                         >
                           <Edit3 size={15} />
                         </button>
-                        <button
-                          onClick={() => setPendingDelete(task)}
-                          className="p-1.5 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-lg transition-colors"
-                          title="Xóa công việc"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => setPendingDelete(task)}
+                            className="p-1.5 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-lg transition-colors"
+                            title="Xóa công việc"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -680,7 +689,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
       <ConfirmModal
         open={pendingDelete !== null}
         title="Xóa công việc?"
-        description={pendingDelete ? `Bạn sắp xóa ${pendingDelete.taskCode}. Thao tác này không thể hoàn tác.` : ''}
+        description={pendingDelete ? `${pendingDelete.taskCode} sẽ được ẩn khỏi danh sách đang hoạt động; lịch sử và dữ liệu liên quan được giữ lại.` : ''}
         confirmLabel="Xóa công việc"
         destructive
         onCancel={() => setPendingDelete(null)}

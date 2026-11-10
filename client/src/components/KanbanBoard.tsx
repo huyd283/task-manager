@@ -113,6 +113,10 @@ export default function KanbanBoard() {
       toast.error(`Không thể chuyển trực tiếp từ ${STATUS_META[task.status].label} sang ${STATUS_META[newStatus].label}.`);
       return;
     }
+    if (newStatus === 'IN_PROGRESS' && (!task.startDate || !task.dueDate)) {
+      toast.error('Hãy điền ngày bắt đầu và hạn chót trước khi chuyển task sang Đang thực hiện.');
+      return;
+    }
 
     // Optimistic Update: Cập nhật giao diện ngay lập tức
     setTasks((prevTasks) =>

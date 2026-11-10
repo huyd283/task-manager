@@ -87,7 +87,7 @@ const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   TODO: ['IN_PROGRESS', 'PENDING'],
   IN_PROGRESS: ['DEV_DONE', 'PENDING'],
   DEV_DONE: ['TESTING', 'IN_PROGRESS'],
-  TESTING: ['REVIEW', 'TEST_FAIL'],
+  TESTING: ['REVIEW', 'DONE', 'TEST_FAIL'],
   TEST_FAIL: ['IN_PROGRESS', 'TESTING'],
   REVIEW: ['DONE', 'TEST_FAIL'],
   DONE: ['GOLIVE', 'REVIEW'],
@@ -105,6 +105,9 @@ async function validateStatusTransition(
   if (status === existing.status) return;
   if (!ALLOWED_TRANSITIONS[existing.status].includes(status)) {
     throw new HttpError(409, `Cannot transition task from ${existing.status} to ${status}`);
+  }
+  if (status === 'IN_PROGRESS' && (!existing.startDate || !existing.dueDate)) {
+    throw new HttpError(400, 'Add both a start date and a due date before moving this task to In Progress');
   }
   if (status === 'REVIEW' || status === 'DONE' || status === 'GOLIVE') {
     const [rows] = await pool.query<Array<RowDataPacket & { remaining: number }>>(
@@ -168,6 +171,9 @@ export async function getOne(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   const body = (req.body ?? {}) as Record<string, unknown>;
 
+  if (Object.hasOwn(body, 'actualDate') && body.actualDate !== null) {
+    throw new HttpError(400, 'Completion date is recorded automatically when the task is marked Done');
+  }
   if (!body.title || typeof body.title !== 'string') {
     throw new HttpError(400, 'title is required');
   }
@@ -177,6 +183,12 @@ export async function create(req: Request, res: Response) {
   if (body.status !== undefined) assertStatus(body.status);
   if (body.status !== undefined && body.status !== 'TODO') {
     throw new HttpError(400, 'New tasks must start in To Do');
+  }
+  for (const dateField of ['startDate', 'estimatedDate', 'dueDate'] as const) {
+    if (!Object.hasOwn(body, dateField)) continue;
+    body[dateField] = body[dateField] === '' || body[dateField] === null
+      ? null
+      : assertDateFilter(body[dateField], dateField);
   }
   if (body.priority !== undefined) assertPriority(body.priority);
   if (body.estimatedHours !== undefined && body.estimatedHours !== null &&
@@ -210,7 +222,11 @@ export async function update(req: Request, res: Response) {
   await assertTaskAccess(req, existing);
 
   const body = { ...(req.body ?? {}) };
-  for (const dateField of ['estimatedDate', 'actualDate'] as const) {
+  if (Object.hasOwn(body, 'actualDate') && body.actualDate !== null) {
+    throw new HttpError(400, 'Completion date is recorded automatically when the task is marked Done');
+  }
+  delete body.actualDate;
+  for (const dateField of ['estimatedDate'] as const) {
     if (Object.hasOwn(body, dateField)) {
       const requestedDate = body[dateField] === '' ? null : body[dateField];
       if (requestedDate !== existing[dateField]) {
@@ -406,11 +422,14 @@ export async function deleteAttachment(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
+  if (req.user?.role !== 'admin') {
+    throw new HttpError(403, 'Only administrators can delete tasks');
+  }
   const id = parseId(req.params.id);
   const existing = await taskRepo.getTaskById(id);
   if (!existing) throw new HttpError(404, 'Task not found');
   await assertTaskAccess(req, existing);
-  const ok = await taskRepo.deleteTask(id);
+  const ok = await taskRepo.deleteTask(id, req.user.id);
   if (!ok) throw new HttpError(404, 'Task not found');
   res.status(204).send();
 }

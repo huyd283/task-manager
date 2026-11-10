@@ -31,6 +31,9 @@ export async function migrateCheckinIntegration(): Promise<void> {
     if (!existingColumns.has('partner_status')) {
       await connection.query('ALTER TABLE users ADD COLUMN partner_status VARCHAR(30) NULL');
     }
+    if (!existingColumns.has('is_acc_admin')) {
+      await connection.query('ALTER TABLE users ADD COLUMN is_acc_admin TINYINT(1) NOT NULL DEFAULT 0');
+    }
 
     const [indexes] = await connection.query<Array<RowDataPacket & { INDEX_NAME: string }>>(
       `SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
@@ -42,6 +45,7 @@ export async function migrateCheckinIntegration(): Promise<void> {
         'ALTER TABLE users ADD UNIQUE INDEX uq_users_partner_user_id (partner_user_id)',
       );
     }
+
   } finally {
     await connection.end();
   }

@@ -5,6 +5,7 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
     this.name = 'HttpError';
@@ -19,7 +20,10 @@ export function notFound(_req: Request, res: Response) {
 /** Central error handler. Must keep the 4-arg signature for Express. */
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) {
-    return res.status(err.status).json({ message: err.message });
+    return res.status(err.status).json({
+      message: err.message,
+      ...(err.code ? { code: err.code } : {}),
+    });
   }
 
   // Surface MySQL duplicate-key errors as 409 instead of a generic 500.

@@ -5,8 +5,8 @@ export const TASK_STATUSES = [
   'DEV_DONE',
   'TESTING',
   'TEST_FAIL',
-  'DONE',
   'REVIEW',
+  'DONE',
   'GOLIVE',
   'PENDING',
 ] as const;
@@ -32,6 +32,7 @@ export interface Task {
   estimatedDate: string | null;
   dueDate: string | null;
   actualDate: string | null;
+  completedAt: string | null;
   estimatedHours: number | null;
   loggedHours: number;
   goliveDate: string | null;
@@ -74,7 +75,6 @@ export interface CreateTaskInput {
   startDate?: string | null;
   estimatedDate?: string | null;
   dueDate?: string | null;
-  actualDate?: string | null;
   estimatedHours?: number | null;
   loggedHours?: number;
   acceptanceNotes?: string | null;

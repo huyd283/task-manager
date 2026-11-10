@@ -4,6 +4,8 @@ import { env } from './config/env';
 import { migrateTaskWorkflow } from './utils/taskWorkflowMigration';
 import { migrateTaskFeatures } from './utils/taskFeaturesMigration';
 import { migrateCheckinIntegration } from './utils/checkinMigration';
+import { migrateNotificationModule } from './utils/notificationMigration';
+import { startNotificationCronJobs } from './jobs/notificationCron';
 
 async function main() {
   try {
@@ -13,6 +15,8 @@ async function main() {
     console.log('✓ Task feature database is up to date');
     await migrateCheckinIntegration();
     console.log('✓ Checkin integration database is up to date');
+    await migrateNotificationModule();
+    console.log('✓ Notification database is up to date');
     await assertDbConnection();
     console.log('✓ Connected to MySQL');
   } catch (err) {
@@ -24,6 +28,7 @@ async function main() {
   const app = createApp();
   app.listen(env.port, () => {
     console.log(`✓ Server listening on http://localhost:${env.port}`);
+    startNotificationCronJobs();
   });
 }
 

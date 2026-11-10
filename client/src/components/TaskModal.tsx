@@ -58,7 +58,6 @@ interface FormState {
   startDate: string;
   estimatedDate: string;
   dueDate: string;
-  actualDate: string;
   estimatedHours: string;
   loggedHours: string;
   acceptanceNotes: string;
@@ -119,7 +118,6 @@ function toForm(task: Task | null): FormState {
     startDate: task?.startDate ?? '',
     estimatedDate: task?.estimatedDate ?? '',
     dueDate: task?.dueDate ?? '',
-    actualDate: task?.actualDate ?? '',
     estimatedHours: task?.estimatedHours == null ? '' : String(task.estimatedHours),
     loggedHours: String(task?.loggedHours ?? 0),
     acceptanceNotes: task?.acceptanceNotes ?? '',
@@ -141,7 +139,6 @@ function toPayload(form: FormState) {
     startDate: clean(form.startDate),
     estimatedDate: clean(form.estimatedDate),
     dueDate: clean(form.dueDate),
-    actualDate: clean(form.actualDate),
     estimatedHours: form.estimatedHours.trim() === '' ? null : Number(form.estimatedHours),
     loggedHours: Number(form.loggedHours || 0),
     acceptanceNotes: clean(form.acceptanceNotes),
@@ -474,8 +471,17 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
     return () => { cancelled = true; };
   }, [form.projectId]);
 
-  const update = (field: keyof FormState, value: string) =>
+  const update = (field: keyof FormState, value: string) => {
+    if (field === 'status' && value === 'IN_PROGRESS' && task?.status !== 'IN_PROGRESS' &&
+      (!form.startDate || !form.dueDate)) {
+      const message = 'Vui lòng điền cả ngày bắt đầu và hạn chót trước khi chuyển sang Đang thực hiện.';
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    setError('');
     setForm((prev) => ({ ...prev, [field]: value }) as FormState);
+  };
   const appendDescriptionMarkup = (markup: string) => {
     setForm((current) => ({
       ...current,
@@ -512,6 +518,13 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       toast.error('Vui lòng chọn dự án.');
       return;
     }
+    if (isEdit && task && form.status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS' &&
+      (!form.startDate || !form.dueDate)) {
+      const message = 'Vui lòng điền cả ngày bắt đầu và hạn chót trước khi chuyển sang Đang thực hiện.';
+      setError(message);
+      toast.error(message);
+      return;
+    }
     setError('');
     setSaving(true);
     const toastId = toast.loading(isEdit ? 'Đang cập nhật công việc...' : 'Đang tạo công việc...');
@@ -520,7 +533,6 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       if (isEdit && task) {
         const updatePayload = { ...payload };
         delete updatePayload.estimatedDate;
-        delete updatePayload.actualDate;
         if (form.status !== 'TODO') {
           delete updatePayload.startDate;
           delete updatePayload.dueDate;
@@ -837,13 +849,9 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-emerald-600 mb-1">Hoàn thành</label>
-                <input
-                  type="date"
-                  className={inputClass}
-                  value={form.actualDate}
-                  onChange={(e) => update('actualDate', e.target.value)}
-                  disabled={isEdit}
-                />
+                <p className="rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-xs font-medium text-slate-500">
+                  Tự động ghi nhận khi chuyển sang Done
+                </p>
               </div>
             </div>
             <div>
@@ -1144,6 +1152,16 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     disabled={form.status !== 'TODO'}
                   />
                 </label>
+                <div className="rounded-lg bg-slate-50 px-3 py-2">
+                  <p className="text-[10px] font-bold text-emerald-700">Hoàn thành lúc</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {task?.completedAt
+                      ? new Date(task.completedAt).toLocaleString()
+                      : task && ['DONE', 'GOLIVE'].includes(task.status)
+                        ? 'Không có dữ liệu thời điểm hoàn thành'
+                        : 'Tự động ghi nhận khi chuyển sang Done'}
+                  </p>
+                </div>
                 {form.status !== 'TODO' && <p className="text-[10px] text-slate-400">Chỉ có thể thay đổi ngày khi công việc ở trạng thái To Do.</p>}
               </section>
               <button
@@ -1197,6 +1215,8 @@ function historyActionLabel(action: string): string {
     estimatedDate: 'đổi ngày dự kiến',
     dueDate: 'đổi hạn chót',
     actualDate: 'cập nhật ngày hoàn thành',
+    completedAt: 'ghi nhận thời điểm hoàn thành',
+    deleted: 'xóa mềm công việc',
     attachment_added: 'đính kèm tệp',
   };
   return labels[action] ?? action;

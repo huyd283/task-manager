@@ -12,9 +12,59 @@ CREATE TABLE IF NOT EXISTS users (
   is_active  TINYINT(1) NOT NULL DEFAULT 1,
   partner_user_id BIGINT UNSIGNED NULL,
   partner_status VARCHAR(30) NULL,
+  is_acc_admin TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_users_partner_user_id (partner_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_fcm_tokens (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  fcm_token VARCHAR(512) NOT NULL,
+  is_bound TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_user_fcm_tokens_token (fcm_token),
+  INDEX idx_user_fcm_tokens_user_bound (user_id, is_bound),
+  CONSTRAINT fk_user_fcm_tokens_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  request_id CHAR(36) NOT NULL,
+  user_id INT NOT NULL,
+  partner_user_id BIGINT UNSIGNED NOT NULL,
+  initiated_by_user_id INT NULL,
+  source VARCHAR(30) NOT NULL DEFAULT 'SYSTEM',
+  title VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  data JSON NULL,
+  delivery_status ENUM('RECORDED','SENT','FAILED') NOT NULL,
+  device_count INT UNSIGNED NOT NULL DEFAULT 0,
+  accepted_device_count INT UNSIGNED NOT NULL DEFAULT 0,
+  error_code VARCHAR(100) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_notification_history_request (request_id),
+  INDEX idx_notification_history_user_created (user_id, created_at),
+  CONSTRAINT fk_notification_history_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS internal_partner_audit (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  request_id CHAR(36) NOT NULL,
+  partner_code VARCHAR(100) NULL,
+  method VARCHAR(10) NOT NULL,
+  path VARCHAR(255) NOT NULL,
+  recipient_count SMALLINT UNSIGNED NULL,
+  http_status SMALLINT UNSIGNED NOT NULL,
+  outcome VARCHAR(40) NOT NULL,
+  duration_ms INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_internal_partner_audit_created (created_at),
+  INDEX idx_internal_partner_audit_request (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS pending_registrations (
@@ -76,7 +126,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   project_id     INT NOT NULL,
   title          VARCHAR(255) NOT NULL,
   description    TEXT         NULL,
-  status         ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING') NOT NULL DEFAULT 'TODO',
+  status         ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','REVIEW','DONE','GOLIVE','PENDING') NOT NULL DEFAULT 'TODO',
   priority       ENUM('LOW','MEDIUM','HIGH','URGENT') NOT NULL DEFAULT 'MEDIUM',
   assignee_user_id INT        NULL,
   assignee       VARCHAR(120) NULL,
@@ -84,6 +134,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   estimated_date DATE         NULL,
   due_date       DATE         NULL,
   actual_date    DATE         NULL,
+  completed_at   DATETIME     NULL,
   estimated_time DECIMAL(8,2) NULL,
   logged_hours DECIMAL(8,2) NOT NULL DEFAULT 0,
   golive_date DATE NULL,
@@ -91,7 +142,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   sprint_id INT NULL,
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at     DATETIME     NULL,
+  deleted_by_user_id INT      NULL,
   INDEX idx_tasks_status (status),
+  INDEX idx_tasks_deleted_at (deleted_at),
   INDEX idx_tasks_assignee (assignee),
   INDEX idx_tasks_assignee_user_id (assignee_user_id),
   INDEX idx_tasks_project (project),

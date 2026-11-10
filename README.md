@@ -94,13 +94,42 @@ Sau lần chạy thành công đầu tiên, checkpoint được lưu trong `chec
 
 Đảm bảo đã build bản deploy, `.env` được nạp trong môi trường cron và cấu hình URL HTTPS ở production. Mỗi nhân viên cần `userId` (hoặc `id`), `email`, `name`, tùy chọn `username` (hoặc `userName`), `status`/`state`, `isAccAdmin`, trạng thái soft-delete (`isDeleted`/`deleted`/`deletedAt`), `jobTitle`, `department`. Không trả password/token hoặc trường nhạy cảm trong payload nhân sự.
 
+### Internal Partner Notifications
+
+The endpoint `POST /api/v1/internal/notifications/send` is called by Checkin and authenticates `X-Partner-Code` and `X-Partner-Token` against TomoHub's partner configuration. It validates `userIds` exclusively against `users.partner_user_id`, deduplicates IDs, caps the input at 50, and rejects the whole request with HTTP 400 / `INVALID_NOTIFICATION_RECIPIENTS` unless every user is active, has `partner_status = 'ACTIVE'`, is not marked `is_acc_admin`, and is not a local admin. Valid requests are recorded per recipient in `notification_history` with status `RECORDED`; this partner route does not invoke FCM and does not require device tokens. Its response reports `accepted`/`recorded` counts; `sent` remains 0 because no device delivery is attempted.
+
+Admins can manage notifications in the TomoHub web app at `/notifications`; the mirror status list is available at `/employees`. These screens use authenticated admin APIs and do not expose partner credentials to the browser. For sends, the browser calls TomoHub's `POST /api/admin/notifications/send`; the TomoHub backend then calls the Checkin server at `CHECKIN_BASE_URL/api/v1/internal/notifications/send` with partner headers and a fresh UUID v7 `X-Client-Message-Id`. The TomoHub admin API returns the `data` payload from Checkin.
+
+The similarly named `POST /api/v1/internal/notifications/send` mounted in TomoHub is a separate inbound route for Checkin-to-TomoHub requests; it records validated requests locally without invoking FCM. The Admin flow sends outbound to the Checkin host. Checkin API responses are logged as redacted summaries; credentials and notification content are not logged. With PM2, inspect output using `pm2 logs <app-name> --lines 200` and search for `[Checkin response]`, `/api/v1/internal/notifications/send`, or the returned request ID.
+
+Run the schema migration before deployment with `cd server && npm run db:migrate:notifications`; the server also applies it during startup. Configure Firebase Admin with `FIREBASE_SERVICE_ACCOUNT_JSON` from a secret manager, or provide Application Default Credentials, and optionally set `FIREBASE_PROJECT_ID`. Never commit service-account credentials.
+
+The TomoHub inbound route stores per-recipient history, and internal partner requests are written to `internal_partner_audit`, including rejected requests. The Admin send now delegates delivery to the Checkin API and does not use TomoHub FCM tokens.
+
+The backend schedules two jobs in `Asia/Ho_Chi_Minh`: task/due-date/new-assignment reminders at 09:00 and reminders for assigned users with no task history/comment/attachment activity that day at 09:30. Both skip Sundays and the last two Saturdays of each month. “Due soon” means due today or tomorrow; overdue tasks have a due date before today. Jobs use MySQL advisory locks to avoid duplicate execution across PM2 workers and call the existing `sendNotificationToCheckin` service; Checkin handles device delivery and no TomoHub FCM tokens are required for these jobs. Per-recipient attempts are stored in `notification_history` with source `CRON_DAILY` or `CRON_INACTIVITY`; failures to contact Checkin are stored with status `FAILED`.
+
+Example request body:
+
+```json
+{
+  "userIds": [123, 124],
+  "title": "Thông báo từ hệ thống công việc",
+  "body": "Bạn có công việc cần xử lý.",
+  "data": {
+    "type": "GENERAL_NOTIFICATION",
+    "screen": "HOME",
+    "taskId": "TASK-0073"
+  }
+}
+```
+
 Để nâng cấp workflow, mức ưu tiên, lịch sử thao tác và bảng lưu tệp đính kèm trên database đang có dữ liệu, chạy:
 
 ```bash
 npm run db:migrate:task-workflow
 ```
 
-Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_FAIL` và mức ưu tiên mặc định `MEDIUM`; dữ liệu task hiện có được giữ nguyên. Migration cũng tạo quan hệ nhiều-nhiều người phụ trách task và chuyển người phụ trách hiện tại sang quan hệ mới. Hãy chạy migration trước khi triển khai backend/frontend mới. Tệp đính kèm hỗ trợ ảnh dưới 5 MB; PDF và text tối đa 8 MB mỗi tệp.
+Migration đổi task `IN_REVIEW` cũ thành `DEV_DONE`, thêm `TESTING`, `TEST_FAIL` và mức ưu tiên mặc định `MEDIUM`; dữ liệu task hiện có được giữ nguyên. Migration cũng tạo quan hệ nhiều-nhiều người phụ trách task và chuyển người phụ trách hiện tại sang quan hệ mới, thêm `completed_at` để ghi timestamp tự động khi task vào `DONE`, và các cột soft-delete (`deleted_at`, `deleted_by_user_id`). Xóa task chỉ dành cho Admin và không xóa cứng lịch sử. Chuyển sang `IN_PROGRESS` yêu cầu có cả ngày bắt đầu và hạn chót; Backlog hỗ trợ tìm kiếm/cuộn, Sprint ẩn task `DONE`, và workflow cho phép chuyển `TESTING` thẳng sang `DONE` để bỏ qua Review. Hãy chạy migration trước khi triển khai backend/frontend mới. Tệp đính kèm hỗ trợ ảnh dưới 5 MB; PDF và text tối đa 8 MB mỗi tệp.
 Với database từ phiên bản cũ, hãy chạy sau các migration `users`, `task-assignees` và `projects` nếu những phần đó chưa được nâng cấp.
 Backend cũng tự kiểm tra và áp dụng migration này trước khi mở cổng nhận request. Tài khoản database chạy ứng dụng cần quyền `ALTER` và `CREATE`; nếu muốn tách migration khỏi lúc khởi động, hãy chạy lệnh migration trong bước deploy trước khi khởi động backend.
 
@@ -259,7 +288,7 @@ Kanban dùng `client/src/components/KanbanBoard.tsx`; card hiển thị mã task
 | `npm run dev`          | Chạy backend + frontend cùng lúc          |
 | `npm run db:init`      | Tạo bảng + seed mock data                 |
 | `npm run db:migrate:users` | Nâng cấp bảng users mà không xóa dữ liệu |
-| `npm run db:migrate:task-workflow` | Nâng cấp workflow, priority, lịch sử và tệp task |
+| `npm run db:migrate:task-workflow` | Nâng cấp workflow, priority, soft-delete, completion timestamp, lịch sử và tệp task |
 | `npm run build`        | Build cả server và client                 |
 | `npm run install:all`  | Cài dependencies cho root + server + client |
 # task-manager

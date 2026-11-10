@@ -4,8 +4,8 @@ export const TASK_STATUSES = [
   'DEV_DONE',
   'TESTING',
   'TEST_FAIL',
-  'DONE',
   'REVIEW',
+  'DONE',
   'GOLIVE',
   'PENDING',
 ] as const;
@@ -15,7 +15,7 @@ export const STATUS_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   TODO: ['IN_PROGRESS', 'PENDING'],
   IN_PROGRESS: ['DEV_DONE', 'PENDING'],
   DEV_DONE: ['TESTING', 'IN_PROGRESS'],
-  TESTING: ['REVIEW', 'TEST_FAIL'],
+  TESTING: ['REVIEW', 'DONE', 'TEST_FAIL'],
   TEST_FAIL: ['IN_PROGRESS', 'TESTING'],
   REVIEW: ['DONE', 'TEST_FAIL'],
   DONE: ['GOLIVE', 'REVIEW'],
@@ -42,6 +42,7 @@ export interface Task {
   estimatedDate: string | null;
   dueDate: string | null;
   actualDate: string | null;
+  completedAt: string | null;
   estimatedHours: number | null;
   loggedHours: number;
   goliveDate: string | null;

@@ -20,6 +20,7 @@ interface TaskRow extends RowDataPacket {
   estimated_date: string | null;
   due_date: string | null;
   actual_date: string | null;
+  completed_at: string | null;
   estimated_time: number | string | null;
   logged_hours: number | string;
   golive_date: string | null;
@@ -49,6 +50,7 @@ function mapRow(row: TaskRow): Task {
     estimatedDate: row.estimated_date,
     dueDate: row.due_date,
     actualDate: row.actual_date,
+    completedAt: row.completed_at,
     estimatedHours: row.estimated_time === null ? null : Number(row.estimated_time),
     loggedHours: Number(row.logged_hours ?? 0),
     goliveDate: row.golive_date,
@@ -71,7 +73,6 @@ const COLUMN_MAP: Record<string, string> = {
   startDate: 'start_date',
   estimatedDate: 'estimated_date',
   dueDate: 'due_date',
-  actualDate: 'actual_date',
   estimatedHours: 'estimated_time',
   loggedHours: 'logged_hours',
   acceptanceNotes: 'acceptance_notes',
@@ -102,7 +103,7 @@ export interface TaskFilter {
 }
 
 export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
-  const clauses: string[] = [];
+  const clauses: string[] = ['tasks.deleted_at IS NULL'];
   const params: unknown[] = [];
 
   if (filter.status) {
@@ -146,7 +147,7 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
 
 export async function getTaskById(id: number): Promise<Task | null> {
   const [rows] = await pool.query<TaskRow[]>(
-    `${TASK_SELECT} WHERE tasks.id = ? LIMIT 1`,
+    `${TASK_SELECT} WHERE tasks.id = ? AND tasks.deleted_at IS NULL LIMIT 1`,
     [id],
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -182,8 +183,8 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
     const [result] = await connection.query<ResultSetHeader>(
       `INSERT INTO tasks
          (task_code, project_id, project, title, description, status, priority, assignee_user_id, assignee,
-          start_date, estimated_date, due_date, actual_date, estimated_time, logged_hours)
-        VALUES (?, ?, (SELECT name FROM projects WHERE id = ?), ?, ?, ?, ?, ?, (SELECT name FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?)`,
+          start_date, estimated_date, due_date, actual_date, completed_at, estimated_time, logged_hours)
+          VALUES (?, ?, (SELECT name FROM projects WHERE id = ?), ?, ?, ?, ?, ?, (SELECT name FROM users WHERE id = ?), ?, ?, ?, NULL, NULL, ?, ?)`,
       [
         input.taskCode,
         input.projectId,
@@ -197,7 +198,6 @@ export async function createTask(input: CreateTaskInput & { taskCode: string }, 
         input.startDate ?? null,
         input.estimatedDate ?? null,
         input.dueDate ?? null,
-        input.actualDate ?? null,
         input.estimatedHours ?? null,
         input.loggedHours ?? 0,
       ],
@@ -239,7 +239,7 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
   try {
     await connection.beginTransaction();
     const [rows] = await connection.query<Array<RowDataPacket & Record<string, unknown>>>(
-      'SELECT * FROM tasks WHERE id = ? FOR UPDATE',
+      'SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL FOR UPDATE',
       [id],
     );
     const current = rows[0];
@@ -256,6 +256,9 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
     const returnsToTodo = current.status === 'PENDING' && input.status === 'TODO';
     if (dateChanges && !staysTodo && !returnsToTodo) {
       throw new HttpError(400, 'Start date and due date can only be changed while the task is TODO');
+    }
+    if (input.status === 'IN_PROGRESS' && current.status !== 'IN_PROGRESS' && (!current.start_date || !current.due_date)) {
+      throw new HttpError(400, 'Add both a start date and a due date before moving this task to In Progress');
     }
     if (input.status === 'REVIEW' || input.status === 'DONE' || input.status === 'GOLIVE') {
       const [incomplete] = await connection.query<RowDataPacket[]>(
@@ -291,7 +294,7 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
         continue;
       }
 
-      const dateField = ['startDate', 'estimatedDate', 'dueDate', 'actualDate'].includes(key);
+      const dateField = ['startDate', 'estimatedDate', 'dueDate'].includes(key);
       const normalize = (value: unknown) => value == null ? null : dateField ? String(value).slice(0, 10) : String(value);
       if (normalize(oldValue) !== normalize(newValue)) {
         changes.push({
@@ -353,17 +356,22 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
       sets.push('golive_date = NULL');
     }
 
-    if ((input.status === 'DONE' || input.status === 'GOLIVE') && current.actual_date == null && !('actualDate' in input)) {
-      const [todayRows] = await connection.query<Array<RowDataPacket & { today: string }>>(
-        "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today",
+    if (input.status === 'DONE' && current.status !== 'DONE') {
+      const [timestampRows] = await connection.query<Array<RowDataPacket & { today: string; completedAt: string }>>(
+        "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS completedAt",
       );
-      changes.push({ action: 'actualDate', oldValue: null, newValue: todayRows[0].today });
-      sets.push('actual_date = CURDATE()');
+      changes.push({ action: 'actualDate', oldValue: null, newValue: timestampRows[0].today });
+      changes.push({ action: 'completedAt', oldValue: null, newValue: timestampRows[0].completedAt });
+      sets.push('actual_date = CURDATE()', 'completed_at = CURRENT_TIMESTAMP');
+    } else if (current.status === 'DONE' && input.status !== undefined && input.status !== 'DONE' && input.status !== 'GOLIVE') {
+      changes.push({ action: 'actualDate', oldValue: current.actual_date == null ? null : String(current.actual_date), newValue: null });
+      changes.push({ action: 'completedAt', oldValue: current.completed_at == null ? null : String(current.completed_at), newValue: null });
+      sets.push('actual_date = NULL', 'completed_at = NULL');
     }
 
     if (sets.length > 0) {
       params.push(id);
-      await connection.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`, params);
+      await connection.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ? AND deleted_at IS NULL`, params);
       for (const change of changes) {
         await connection.query(
           'INSERT INTO task_history (task_id, user_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?)',
@@ -469,17 +477,35 @@ export async function deleteTaskAttachment(taskId: number, attachmentId: number)
   return result.affectedRows > 0;
 }
 
-export async function deleteTask(id: number): Promise<boolean> {
-  const [result] = await pool.query<ResultSetHeader>(
-    'DELETE FROM tasks WHERE id = ?',
-    [id],
-  );
+export async function deleteTask(id: number, userId: number): Promise<boolean> {
+  const connection = await pool.getConnection();
+  let result: ResultSetHeader;
+  try {
+    await connection.beginTransaction();
+    const [updated] = await connection.query<ResultSetHeader>(
+      'UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP, deleted_by_user_id = ? WHERE id = ? AND deleted_at IS NULL',
+      [userId, id],
+    );
+    result = updated;
+    if (result.affectedRows > 0) {
+      await connection.query(
+        'INSERT INTO task_history (task_id, user_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?)',
+        [id, userId, 'deleted', null, 'soft-deleted'],
+      );
+    }
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
   return result.affectedRows > 0;
 }
 
 export async function taskIsInProject(id: number, projectId: number): Promise<boolean> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT id FROM tasks WHERE id = ? AND project_id = ? LIMIT 1',
+    'SELECT id FROM tasks WHERE id = ? AND project_id = ? AND deleted_at IS NULL LIMIT 1',
     [id, projectId],
   );
   return rows.length > 0;
@@ -509,8 +535,8 @@ export interface AssigneeStat {
  */
 export async function getStatsByAssignee(userId?: number): Promise<AssigneeStat[]> {
   const visibility = userId
-    ? 'WHERE EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = tasks.project_id AND pm.user_id = ?)'
-    : '';
+    ? 'WHERE tasks.deleted_at IS NULL AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = tasks.project_id AND pm.user_id = ?)'
+    : 'WHERE tasks.deleted_at IS NULL';
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT
       COALESCE(assigned_user.name, tasks.assignee, 'Unassigned') AS assignee,

@@ -28,6 +28,10 @@ export const env = {
     employeePageSize: Number(process.env.CHECKIN_EMPLOYEE_PAGE_SIZE ?? 200),
     employeeSyncOverlapSeconds: Number(process.env.CHECKIN_EMPLOYEE_SYNC_OVERLAP_SECONDS ?? 120),
   },
+  firebase: {
+    projectId: process.env.FIREBASE_PROJECT_ID?.trim() ?? '',
+    serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON ?? '',
+  },
   db: {
     host: process.env.DB_HOST ?? 'localhost',
     port: Number(process.env.DB_PORT ?? 3306),

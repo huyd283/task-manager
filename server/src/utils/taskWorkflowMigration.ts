@@ -1,7 +1,7 @@
 import mysql, { type RowDataPacket } from 'mysql2/promise';
 import { env } from '../config/env';
 
-const FINAL_STATUS_ENUM = "enum('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING')";
+const FINAL_STATUS_ENUM = "enum('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','REVIEW','DONE','GOLIVE','PENDING')";
 const LEGACY_STATUS_ENUM =
   "enum('TODO','IN_PROGRESS','IN_REVIEW','DEV_DONE','TESTING','TEST_FAIL','DONE','PENDING')";
 
@@ -38,7 +38,7 @@ export async function migrateTaskWorkflow(): Promise<void> {
     if (statusColumnType !== FINAL_STATUS_ENUM.toLowerCase()) {
       await connection.query(
         `ALTER TABLE tasks
-         MODIFY status ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','DONE','REVIEW','GOLIVE','PENDING')
+         MODIFY status ENUM('TODO','IN_PROGRESS','DEV_DONE','TESTING','TEST_FAIL','REVIEW','DONE','GOLIVE','PENDING')
          NOT NULL DEFAULT 'TODO'`,
       );
     }
@@ -51,6 +51,29 @@ export async function migrateTaskWorkflow(): Promise<void> {
       await connection.query(
         "ALTER TABLE tasks ADD COLUMN priority ENUM('LOW','MEDIUM','HIGH','URGENT') NOT NULL DEFAULT 'MEDIUM' AFTER status",
       );
+    }
+
+    const [taskColumns] = await connection.query<Array<RowDataPacket & { COLUMN_NAME: string }>>(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks'
+         AND COLUMN_NAME IN ('completed_at', 'deleted_at', 'deleted_by_user_id')`,
+    );
+    const existingTaskColumns = new Set(taskColumns.map((column) => column.COLUMN_NAME));
+    if (!existingTaskColumns.has('completed_at')) {
+      await connection.query('ALTER TABLE tasks ADD COLUMN completed_at DATETIME NULL AFTER actual_date');
+    }
+    if (!existingTaskColumns.has('deleted_at')) {
+      await connection.query('ALTER TABLE tasks ADD COLUMN deleted_at DATETIME NULL');
+    }
+    if (!existingTaskColumns.has('deleted_by_user_id')) {
+      await connection.query('ALTER TABLE tasks ADD COLUMN deleted_by_user_id INT NULL');
+    }
+    const [deletedIndexRows] = await connection.query<Array<RowDataPacket & { INDEX_NAME: string }>>(
+      `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND INDEX_NAME = 'idx_tasks_deleted_at'`,
+    );
+    if (deletedIndexRows.length === 0) {
+      await connection.query('ALTER TABLE tasks ADD INDEX idx_tasks_deleted_at (deleted_at)');
     }
 
     await connection.query(

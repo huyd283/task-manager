@@ -122,7 +122,7 @@ export async function createSubtask(req: Request, res: Response) {
   try {
     await connection.beginTransaction();
     const [parent] = await connection.query<Array<RowDataPacket & { status: string }>>(
-      'SELECT status FROM tasks WHERE id = ? FOR UPDATE',
+      'SELECT status FROM tasks WHERE id = ? AND deleted_at IS NULL FOR UPDATE',
       [task.id],
     );
     if (!parent[0]) throw new HttpError(404, 'Task not found');
@@ -203,8 +203,9 @@ export async function listSprints(req: Request, res: Response) {
   const projectId = await projectForUser(req);
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT s.id, s.project_id AS projectId, s.name, s.start_date AS startDate,
-            s.end_date AS endDate, s.goal, s.status, COUNT(t.id) AS taskCount
-     FROM sprints s LEFT JOIN tasks t ON t.sprint_id = s.id
+            s.end_date AS endDate, s.goal, s.status,
+            COUNT(CASE WHEN t.status <> 'DONE' THEN t.id END) AS taskCount
+     FROM sprints s LEFT JOIN tasks t ON t.sprint_id = s.id AND t.deleted_at IS NULL
      WHERE s.project_id = ? GROUP BY s.id ORDER BY s.start_date DESC`,
     [projectId],
   );
@@ -250,7 +251,7 @@ export async function updateSprintStatus(req: Request, res: Response) {
     if (status === 'COMPLETED' && rows[0].status !== 'ACTIVE') throw new HttpError(409, 'Only an active sprint can be completed');
     await connection.query('UPDATE sprints SET status = ? WHERE id = ?', [status, sprintId]);
     if (status === 'COMPLETED') {
-      await connection.query("UPDATE tasks SET sprint_id = NULL WHERE sprint_id = ? AND status <> 'GOLIVE'", [sprintId]);
+      await connection.query("UPDATE tasks SET sprint_id = NULL WHERE sprint_id = ? AND deleted_at IS NULL AND status NOT IN ('DONE', 'GOLIVE')", [sprintId]);
     }
     await connection.commit();
   } catch (error) {
@@ -273,7 +274,7 @@ export async function assignSprintTask(req: Request, res: Response) {
   );
   if (!sprints.length) throw new HttpError(404, 'Open sprint not found');
   const [result] = await pool.query<ResultSetHeader>(
-    "UPDATE tasks SET sprint_id = ? WHERE id = ? AND project_id = ? AND status <> 'GOLIVE'",
+    "UPDATE tasks SET sprint_id = ? WHERE id = ? AND project_id = ? AND deleted_at IS NULL AND status <> 'GOLIVE'",
     [sprintId, taskId, projectId],
   );
   if (!result.affectedRows) throw new HttpError(404, 'Task not found or already Golive');
@@ -285,7 +286,7 @@ export async function removeSprintTask(req: Request, res: Response) {
   const sprintId = idParam(req.params.sprintId);
   const taskId = Number(req.params.taskId);
   const [result] = await pool.query<ResultSetHeader>(
-    'UPDATE tasks SET sprint_id = NULL WHERE id = ? AND project_id = ? AND sprint_id = ?',
+    'UPDATE tasks SET sprint_id = NULL WHERE id = ? AND project_id = ? AND sprint_id = ? AND deleted_at IS NULL',
     [taskId, projectId, sprintId],
   );
   if (!result.affectedRows) throw new HttpError(404, 'Sprint task not found');
@@ -341,7 +342,7 @@ export async function exportTasks(req: Request, res: Response) {
      LEFT JOIN sprints s ON s.id = t.sprint_id
      LEFT JOIN task_assignees ta ON ta.task_id = t.id
      LEFT JOIN users u ON u.id = ta.user_id
-     WHERE ${clauses.join(' AND ')}
+     WHERE t.deleted_at IS NULL AND ${clauses.join(' AND ')}
      GROUP BY t.id ORDER BY t.id`,
     params,
   );

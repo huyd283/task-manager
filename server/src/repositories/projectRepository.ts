@@ -34,7 +34,7 @@ export async function listProjects(userId?: number): Promise<ProjectRecord[]> {
   const [rows] = await pool.query<Array<RowDataPacket & Omit<ProjectRecord, 'members'>>>(
     `SELECT p.*, COUNT(DISTINCT t.id) AS task_count
      FROM projects p
-     LEFT JOIN tasks t ON t.project_id = p.id
+     LEFT JOIN tasks t ON t.project_id = p.id AND t.deleted_at IS NULL
      ${userId ? 'WHERE EXISTS (SELECT 1 FROM project_members mine WHERE mine.project_id = p.id AND mine.user_id = ?)' : ''}
      GROUP BY p.id ORDER BY p.updated_at DESC, p.name ASC`,
     userId ? [userId] : [],
