@@ -1,9 +1,10 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
-import { findUserByEmail, findUserById } from '../repositories/userRepository';
+import { findUserByEmail, findUserById, findUserByUsername, updateCheckinIdentity } from '../repositories/userRepository';
 import * as registrationRepo from '../repositories/registrationRepository';
 import { sendRegistrationOtp } from '../services/emailService';
+import { verifyCheckinCredentials } from '../services/checkinService';
 import { env } from '../config/env';
 import { signToken } from '../utils/jwt';
 import { HttpError } from '../middleware/errorHandler';
@@ -115,24 +116,35 @@ export async function verifyRegistrationOtp(req: Request, res: Response) {
 }
 
 export async function login(req: Request, res: Response) {
-  const email = normalizeEmail(req.body?.email);
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
-  if (!email || !password) {
-    throw new HttpError(400, 'email and password are required');
+  if (!username || !password) {
+    throw new HttpError(400, 'username and password are required');
   }
 
-  const user = await findUserByEmail(email);
+  const user = await findUserByUsername(username) ?? await findUserByEmail(normalizeEmail(username));
   if (!user) {
     throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
   }
   if (!user.is_active) {
-    throw new HttpError(403, 'This account is inactive');
+    throw new HttpError(403, 'Tài khoản không hoạt động');
   }
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) {
-    throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
+  if (user.role === 'admin' || user.partner_user_id === null) {
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
+    }
+  } else {
+    const partner = await verifyCheckinCredentials(user.username, password);
+    if (!partner.verified) {
+      throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
+    }
+    await updateCheckinIdentity(user.email, partner.userId, partner.status);
+    if (partner.status !== 'ACTIVE') {
+      throw new HttpError(403, 'Tài khoản Checkin không hoạt động');
+    }
   }
 
   const token = signToken({ id: user.id, email: user.email });

@@ -30,6 +30,8 @@ services:
       dockerfile: Dockerfile
     container_name: taskmanager_backend
     restart: unless-stopped
+    env_file:
+      - ./server/.env
     environment:
       NODE_ENV: production
       PORT: 5000

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
+import path from 'node:path';
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 /**
  * Centralised, typed access to environment variables with sensible
@@ -19,6 +20,13 @@ export const env = {
     user: process.env.EMAIL_USER ?? '',
     password: process.env.EMAIL_PASS ?? '',
     from: process.env.EMAIL_FROM ?? process.env.EMAIL_USER ?? '',
+  },
+  checkin: {
+    baseUrl: process.env.CHECKIN_BASE_URL?.trim() ?? '',
+    partnerCode: process.env.CHECKIN_PARTNER_CODE?.trim() ?? 'TMT_PM',
+    partnerToken: process.env.CHECKIN_PARTNER_TOKEN?.trim() ?? '',
+    employeePageSize: Number(process.env.CHECKIN_EMPLOYEE_PAGE_SIZE ?? 200),
+    employeeSyncOverlapSeconds: Number(process.env.CHECKIN_EMPLOYEE_SYNC_OVERLAP_SECONDS ?? 120),
   },
   db: {
     host: process.env.DB_HOST ?? 'localhost',

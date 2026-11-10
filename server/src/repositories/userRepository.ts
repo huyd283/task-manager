@@ -1,17 +1,22 @@
 import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { randomBytes } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { pool } from '../config/db';
+import type { CheckinEmployee } from '../services/checkinService';
 
 export interface UserRow extends RowDataPacket {
   id: number;
   name: string;
   email: string;
+  username: string;
   password: string;
   role: string;
   employee_code: string;
   job_title: string;
   department: string;
   is_active: number;
+  partner_user_id: number | null;
+  partner_status: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +84,107 @@ export async function findUserByEmail(email: string): Promise<UserRow | null> {
     [email],
   );
   return rows[0] ?? null;
+}
+
+export async function findUserByUsername(username: string): Promise<UserRow | null> {
+  const [rows] = await pool.query<UserRow[]>(
+    'SELECT * FROM users WHERE username = ? LIMIT 1',
+    [username],
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateCheckinIdentity(
+  email: string,
+  partnerUserId: number,
+  partnerStatus: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE users
+     SET partner_user_id = ?, partner_status = ?, is_active = ?
+     WHERE email = ?`,
+    [partnerUserId, partnerStatus, partnerStatus === 'ACTIVE' ? 1 : 0, email],
+  );
+}
+
+export async function upsertCheckinEmployee(
+  employee: CheckinEmployee,
+): Promise<'inserted' | 'updated' | 'skipped-admin'> {
+  const [existingRows] = await pool.query<Array<RowDataPacket & { id: number; role: string }>>(
+    `SELECT id, role FROM users
+     WHERE email = ? OR partner_user_id = ?
+     ORDER BY (email = ?) DESC
+     LIMIT 1`,
+    [employee.email, employee.userId, employee.email],
+  );
+  const existing = existingRows[0];
+  if (existing?.role === 'admin') {
+    return 'skipped-admin';
+  }
+  const isActive = employee.status === 'ACTIVE' ? 1 : 0;
+  if (existing) {
+    await pool.query(
+      `UPDATE users
+       SET email = ?, name = ?, username = COALESCE(?, username),
+           job_title = COALESCE(?, job_title), department = COALESCE(?, department),
+           partner_user_id = ?, partner_status = ?, is_active = ?
+       WHERE id = ?`,
+      [
+        employee.email,
+        employee.name,
+        employee.username,
+        employee.jobTitle,
+        employee.department,
+        employee.userId,
+        employee.status,
+        isActive,
+        existing.id,
+      ],
+    );
+    return 'updated';
+  }
+
+  const temporaryPassword = randomBytes(32).toString('hex');
+  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  const temporaryCode = temporaryEmployeeCode();
+  const temporaryUser = temporaryUsername();
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.query<ResultSetHeader>(
+      `INSERT INTO users
+         (name, email, username, password, role, employee_code, job_title, department,
+          is_active, partner_user_id, partner_status)
+       VALUES (?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?)`,
+      [
+        employee.name,
+        employee.email,
+        employee.username ?? temporaryUser,
+        passwordHash,
+        temporaryCode,
+        employee.jobTitle ?? 'Developer',
+        employee.department ?? 'Phát triển Phần mềm',
+        isActive,
+        employee.userId,
+        employee.status,
+      ],
+    );
+    await connection.query(
+      'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
+      [
+        employeeCode(result.insertId),
+        employee.username ?? usernameFor(employee.email, result.insertId),
+        result.insertId,
+      ],
+    );
+    await connection.commit();
+    return 'inserted';
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function findUserById(id: number): Promise<UserRow | null> {

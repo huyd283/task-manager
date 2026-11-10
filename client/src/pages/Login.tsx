@@ -7,7 +7,7 @@ import logo from '../assets/img/logo/logo.jpg';
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -18,7 +18,7 @@ export default function Login() {
     setSubmitting(true);
     const toastId = toast.loading('Đang đăng nhập...');
     try {
-      await login(email, password);
+      await login(username.trim(), password);
       toast.success('Đăng nhập thành công.', { id: toastId });
       navigate('/dashboard');
     } catch (err) {
@@ -46,14 +46,14 @@ export default function Login() {
             <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
           )}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Tên đăng nhập</label>
             <input
-              type="email"
+              type="text"
               className={field}
               autoComplete="username"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
             />
           </div>
           <div>

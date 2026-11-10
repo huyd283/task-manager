@@ -70,6 +70,30 @@ npm run db:migrate:registration-otp
 
 Với Gmail, bật xác minh 2 bước và tạo Google App Password; đặt giá trị đó ở `EMAIL_PASS` (không dùng mật khẩu đăng nhập Gmail). Không commit file `server/.env` hoặc đưa App Password vào mã nguồn. Mã OTP được lưu dạng HMAC, hết hạn sau 5 phút, giới hạn 5 lần nhập sai và chỉ gửi lại sau 60 giây.
 
+### Tích hợp xác thực Checkin
+
+Đặt `CHECKIN_BASE_URL`, `CHECKIN_PARTNER_CODE` và `CHECKIN_PARTNER_TOKEN` trong `server/.env` hoặc secret manager. Dùng `TMT_PM` làm partner code và lưu token bên ngoài repository; không đưa token vào mã nguồn hay log. Khi khởi động, server tự thêm `partner_user_id` và `partner_status` cùng unique index nếu còn thiếu. Migration có thể chạy riêng bằng `cd server && npm run db:migrate:checkin`.
+
+Với Docker Compose, backend nạp cấu hình từ `server/.env` qua `env_file`; sau khi cập nhật cấu hình cần tạo lại container bằng `docker compose up -d --force-recreate backend`. Không đặt token thật trong `.env.example`.
+
+Login nhận `username`/`password` ở TomoHub. Admin TomoHub và tài khoản chưa liên kết Checkin dùng bcrypt/password nội bộ; nhân sự có `partner_user_id` được xác thực qua Checkin. Checkin cần hỗ trợ trường `username` trong request verify. Chỉ phản hồi `verified: true` và `status: ACTIVE` mới nhận JWT do TomoHub tự cấp; trạng thái khác sẽ vô hiệu hóa tài khoản nội bộ và bị từ chối.
+
+```bash
+cd server && npm run build && npm run checkin:sync
+```
+
+Lệnh trên lấy toàn bộ trang `/api/v1/internal/employees` (`page`/`limit`) và upsert theo email, đồng thời dùng `partner_user_id` để cập nhật nếu email thay đổi. Mỗi request danh sách tạo UUID v7 riêng ở `X-Client-Message-Id`; request auth verify không gửi header này. Tài khoản admin TomoHub được giữ nguyên và bỏ qua nếu email/partner ID khớp; nếu API có `isAccAdmin=1` thì bản ghi đó cũng bị bỏ qua. Bản ghi thiếu email hợp lệ được bỏ qua và chỉ ghi số lượng tổng hợp vào log. Nhân viên inactive, terminated và soft-deleted vẫn được đồng bộ, với trạng thái lưu ở `partner_status` và tài khoản không active nếu trạng thái khác `ACTIVE`. Tài khoản mới có mật khẩu ngẫu nhiên không dùng để login (đăng nhập xác thực qua Checkin).
+
+Sau lần chạy thành công đầu tiên, checkpoint được lưu trong `checkin_sync_state`. Các lần sau gửi `updated_since` từ checkpoint trừ phần overlap để hạn chế bỏ sót thay đổi gần thời điểm chạy. Cấu hình `CHECKIN_EMPLOYEE_PAGE_SIZE` (mặc định 200) và `CHECKIN_EMPLOYEE_SYNC_OVERLAP_SECONDS` (mặc định 120). Phía Checkin cần trả tất cả trạng thái, hỗ trợ `page`, `limit`, `updated_since`, sắp thứ tự ổn định `(updated_at, id)`, và cung cấp danh sách qua `data` array hoặc `data.employees`/`data.items`/`data.records`/`data.content`; metadata phân trang có thể đặt ở `data.pagination` và nên có `hasNext`/`hasNextPage`/`totalPages`. Nếu không có metadata, TomoHub tiếp tục khi trang đủ `limit`. Các alias đang map gồm `id` → `userId`, `fullName` → `name`, `positionName` → `jobTitle`, `departmentName` → `department`, và `status`/`state`; trạng thái xóa mềm cần được biểu diễn bằng `isDeleted`, `deleted`, `deletedAt` hoặc status phù hợp.
+
+Để tự chạy mỗi ngày lúc 02:00 theo giờ máy chủ, thêm cron trên host (đổi đường dẫn theo môi trường):
+
+```cron
+0 2 * * * cd /path/to/task-manager/server && npm run checkin:sync >> /var/log/tomohub-checkin-sync.log 2>&1
+```
+
+Đảm bảo đã build bản deploy, `.env` được nạp trong môi trường cron và cấu hình URL HTTPS ở production. Mỗi nhân viên cần `userId` (hoặc `id`), `email`, `name`, tùy chọn `username` (hoặc `userName`), `status`/`state`, `isAccAdmin`, trạng thái soft-delete (`isDeleted`/`deleted`/`deletedAt`), `jobTitle`, `department`. Không trả password/token hoặc trường nhạy cảm trong payload nhân sự.
+
 Để nâng cấp workflow, mức ưu tiên, lịch sử thao tác và bảng lưu tệp đính kèm trên database đang có dữ liệu, chạy:
 
 ```bash
@@ -129,7 +153,7 @@ Tất cả endpoint của Task yêu cầu header `Authorization: Bearer <token>`
 | POST   | `/api/auth/register/request-otp` | Tạo yêu cầu đăng ký và gửi OTP email |
 | POST   | `/api/auth/register/resend-otp` | Gửi lại mã với `{ email }` sau cooldown |
 | POST   | `/api/auth/register/verify-otp` | Xác minh `{ email, otp }` và tạo user |
-| POST   | `/api/auth/login`    | Đăng nhập `{ email, password }`     |
+| POST   | `/api/auth/login`    | Đăng nhập `{ username, password }`  |
 | GET    | `/api/auth/me`       | Thông tin user hiện tại (cần token) |
 
 Tài khoản chỉ được tạo sau OTP hợp lệ. Mã nhân viên mới có dạng `TMT-001`, `TMT-002`, ... dựa trên ID tăng dần của user.

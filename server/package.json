@@ -14,7 +14,9 @@
     "db:migrate:projects": "tsx src/scripts/migrateProjects.ts",
     "db:migrate:registration-otp": "tsx src/scripts/migrateRegistrationOtp.ts",
     "db:migrate:task-workflow": "tsx src/scripts/migrateTaskWorkflow.ts",
-    "db:migrate:task-features": "tsx src/scripts/migrateTaskFeatures.ts"
+    "db:migrate:task-features": "tsx src/scripts/migrateTaskFeatures.ts",
+    "db:migrate:checkin": "tsx src/scripts/migrateCheckin.ts",
+    "checkin:sync": "node dist/scripts/syncCheckinEmployees.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

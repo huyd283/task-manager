@@ -10,8 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
   job_title  VARCHAR(40) NOT NULL DEFAULT 'Developer',
   department VARCHAR(80) NOT NULL DEFAULT 'Phát triển Phần mềm',
   is_active  TINYINT(1) NOT NULL DEFAULT 1,
+  partner_user_id BIGINT UNSIGNED NULL,
+  partner_status VARCHAR(30) NULL,
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_users_partner_user_id (partner_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS pending_registrations (

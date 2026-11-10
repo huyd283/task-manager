@@ -3,6 +3,7 @@ import { assertDbConnection } from './config/db';
 import { env } from './config/env';
 import { migrateTaskWorkflow } from './utils/taskWorkflowMigration';
 import { migrateTaskFeatures } from './utils/taskFeaturesMigration';
+import { migrateCheckinIntegration } from './utils/checkinMigration';
 
 async function main() {
   try {
@@ -10,6 +11,8 @@ async function main() {
     console.log('✓ Task workflow database is up to date');
     await migrateTaskFeatures();
     console.log('✓ Task feature database is up to date');
+    await migrateCheckinIntegration();
+    console.log('✓ Checkin integration database is up to date');
     await assertDbConnection();
     console.log('✓ Connected to MySQL');
   } catch (err) {
