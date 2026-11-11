@@ -17,7 +17,7 @@ export interface NotificationHistoryInput {
   userId: number;
   partnerUserId: number;
   initiatedByUserId: number | null;
-  source: 'PARTNER' | 'ADMIN' | 'CRON_DAILY' | 'CRON_INACTIVITY' | 'SYSTEM';
+  source: 'PARTNER' | 'ADMIN' | 'CRON_DAILY' | 'CRON_INACTIVITY' | 'CRON_NO_TASK' | 'SYSTEM';
   title: string;
   body: string;
   data: Record<string, string>;
@@ -119,6 +119,7 @@ export async function getNotificationHistory(query: NotificationHistoryQuery) {
             MAX(CASE h.source
               WHEN 'CRON_DAILY' THEN 'Tự động - 09:00'
               WHEN 'CRON_INACTIVITY' THEN 'Tự động - 09:30'
+              WHEN 'CRON_NO_TASK' THEN 'Tự động - 10:00'
               WHEN 'PARTNER' THEN 'Checkin'
               WHEN 'ADMIN' THEN admin.name
               ELSE 'Hệ thống'

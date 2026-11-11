@@ -12,6 +12,10 @@ export interface InactiveTaskUser {
   partnerUserId: number;
 }
 
+export interface EmployeeWithoutTask {
+  partnerUserId: number;
+}
+
 interface DailyTaskReminderRow extends RowDataPacket {
   partnerUserId: number;
   overdueCount: number | string;
@@ -20,6 +24,10 @@ interface DailyTaskReminderRow extends RowDataPacket {
 }
 
 interface InactiveTaskUserRow extends RowDataPacket {
+  partnerUserId: number;
+}
+
+interface EmployeeWithoutTaskRow extends RowDataPacket {
   partnerUserId: number;
 }
 
@@ -122,6 +130,30 @@ export async function listUsersWithoutTaskActivityToday(
        )
      ORDER BY u.partner_user_id`,
     [startOfDay, now, startOfDay, now, startOfDay, now],
+  );
+  return rows.map((row) => ({ partnerUserId: Number(row.partnerUserId) }));
+}
+
+export async function listDevelopmentDepartmentUsersWithoutActiveTasks(): Promise<EmployeeWithoutTask[]> {
+  const [rows] = await pool.query<EmployeeWithoutTaskRow[]>(
+    `SELECT u.partner_user_id AS partnerUserId
+     FROM users u
+     WHERE ${ACTIVE_PARTNER_USER_FILTER}
+       AND UPPER(TRIM(u.department)) = 'DEVELOPMENT DEPARTMENT'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM tasks t
+         WHERE t.deleted_at IS NULL
+           AND t.status NOT IN ('DONE', 'GOLIVE')
+           AND (
+             EXISTS (
+               SELECT 1 FROM task_assignees ta
+               WHERE ta.task_id = t.id AND ta.user_id = u.id
+             )
+             OR t.assignee_user_id = u.id
+           )
+       )
+     ORDER BY u.partner_user_id`,
   );
   return rows.map((row) => ({ partnerUserId: Number(row.partnerUserId) }));
 }

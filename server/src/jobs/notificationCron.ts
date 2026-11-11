@@ -3,6 +3,7 @@ import type { RowDataPacket } from 'mysql2';
 import { pool } from '../config/db';
 import {
   isExcludedNotificationDate,
+  runDevelopmentDepartmentNoTaskJob,
   runDailyTaskReminderJob,
   runInactiveTaskUpdateJob,
 } from '../services/scheduledNotificationService';
@@ -85,10 +86,16 @@ export function startNotificationCronJobs(): void {
     timezone: TIME_ZONE,
     noOverlap: true,
   });
+  cron.schedule('0 10 * * *', () => runOnBusinessDay('development-department-no-task', runDevelopmentDepartmentNoTaskJob), {
+    name: 'development-department-no-task',
+    timezone: TIME_ZONE,
+    noOverlap: true,
+  });
   console.info('[Notification cron] scheduled daily jobs', JSON.stringify({
     timezone: TIME_ZONE,
     dailyReminder: '09:00',
     inactivityReminder: '09:30',
+    developmentDepartmentNoTask: '10:00',
     excludedDays: 'Sundays and the last two Saturdays of each month',
   }));
 }

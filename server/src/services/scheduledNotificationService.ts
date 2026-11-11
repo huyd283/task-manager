@@ -7,6 +7,7 @@ import {
 import { HttpError } from '../middleware/errorHandler';
 import {
   listDailyTaskReminders,
+  listDevelopmentDepartmentUsersWithoutActiveTasks,
   listUsersWithoutTaskActivityToday,
   type DailyTaskReminder,
 } from '../repositories/notificationJobRepository';
@@ -56,7 +57,7 @@ async function sendToPartnerUsers(
   partnerUserIds: number[],
   title: string,
   body: string,
-  source: 'CRON_DAILY' | 'CRON_INACTIVITY',
+  source: 'CRON_DAILY' | 'CRON_INACTIVITY' | 'CRON_NO_TASK',
   data: Record<string, string>,
 ): Promise<void> {
   for (let offset = 0; offset < partnerUserIds.length; offset += MAX_RECIPIENTS_PER_SEND) {
@@ -169,6 +170,23 @@ export async function runInactiveTaskUpdateJob(now = new Date()): Promise<void> 
     'Nhắc cập nhật trạng thái công việc',
     'Bạn chưa có hoạt động cập nhật công việc trong ngày hôm nay. Vui lòng kiểm tra và cập nhật trạng thái các công việc được giao.',
     'CRON_INACTIVITY',
+    { type: 'GENERAL_NOTIFICATION', screen: 'HOME' },
+  );
+}
+
+export async function runDevelopmentDepartmentNoTaskJob(): Promise<void> {
+  const employees = await listDevelopmentDepartmentUsersWithoutActiveTasks();
+  const partnerUserIds = employees.map((employee) => employee.partnerUserId);
+
+  console.info('[Notification cron] development department no-task scan completed', JSON.stringify({
+    department: 'DEVELOPMENT DEPARTMENT',
+    recipientCount: partnerUserIds.length,
+  }));
+  await sendToPartnerUsers(
+    partnerUserIds,
+    'Nhắc nhở công việc',
+    'Hiện bạn chưa được giao công việc nào đang thực hiện. Vui lòng liên hệ quản lý nhóm để được phân công công việc.',
+    'CRON_NO_TASK',
     { type: 'GENERAL_NOTIFICATION', screen: 'HOME' },
   );
 }
