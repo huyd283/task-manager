@@ -15,8 +15,8 @@ export class HttpError extends Error {
 /** 404 handler for unmatched routes. */
 export function notFound(_req: Request, res: Response) {
   res.status(404).json({ message: 'Route not found' });
-}
-
+} 
+// check build
 /** Central error handler. Must keep the 4-arg signature for Express. */
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) {
