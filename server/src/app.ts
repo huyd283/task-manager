@@ -35,7 +35,7 @@ export function createApp() {
     authenticateInternalPartner,
     internalNotificationRoutes,
   );
-  app.use("/api/admin", authenticate, requireAdmin, adminNotificationRoutes);
+  app.use(["/api/admin", "/admin"], authenticate, requireAdmin, adminNotificationRoutes);
   app.use(["/api/users", "/users"], authenticate, userRoutes);
   app.use(["/api/projects", "/projects"], authenticate, projectRoutes);
   // All task endpoints require a valid JWT.

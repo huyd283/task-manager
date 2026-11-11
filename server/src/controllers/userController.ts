@@ -79,7 +79,7 @@ export async function options(_req: Request, res: Response) {
       employeeCode: user.employee_code,
       jobTitle: user.job_title,
       department: user.department,
-      isActive: Boolean(user.is_active),
+      
     })),
     count: users.length,
   });
