@@ -50,7 +50,7 @@ export default function ProjectManagement() {
         api.get<{ data: Project[] }>('/projects'),
         canManage ? api.get<{ data: AssignableUser[] }>('/users/options') : Promise.resolve({ data: { data: [] } }),
       ]);
-      setProjects(projectResponse.data.data ?? []);
+      setProjects( []);
       setUsers(userResponse.data.data ?? []);
     } catch (err) {
       const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được dữ liệu dự án.';
