@@ -145,6 +145,24 @@ export async function updateCheckinIdentity(
   );
 }
 
+async function releasePartnerUserId(
+  connection: PoolConnection,
+  partnerUserId: number,
+  excludeUserId?: number,
+): Promise<void> {
+  if (excludeUserId) {
+    await connection.query(
+      'UPDATE users SET partner_user_id = NULL WHERE partner_user_id = ? AND id != ?',
+      [partnerUserId, excludeUserId],
+    );
+  } else {
+    await connection.query(
+      'UPDATE users SET partner_user_id = NULL WHERE partner_user_id = ?',
+      [partnerUserId],
+    );
+  }
+}
+
 export async function upsertCheckinEmployee(
   employee: CheckinEmployee,
 ): Promise<'inserted' | 'updated' | 'skipped-admin'> {
@@ -170,9 +188,12 @@ export async function upsertCheckinEmployee(
 
     const isActive = employee.status === 'ACTIVE' ? 1 : 0;
     const checkinUsername = employee.username?.trim();
+
     if (existing) {
       const username = checkinUsername || existing.employee_code;
       await releaseUsername(connection, username, existing.id);
+      await releasePartnerUserId(connection, employee.userId, existing.id);
+
       await connection.query(
         `UPDATE users
          SET email = ?, name = ?, username = ?,
@@ -196,6 +217,9 @@ export async function upsertCheckinEmployee(
       return 'updated';
     }
 
+    // Giải phóng partner_user_id nếu từng bị gắn nhầm cho user cũ khác trước khi INSERT
+    await releasePartnerUserId(connection, employee.userId);
+
     const temporaryPassword = randomBytes(32).toString('hex');
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     const [result] = await connection.query<ResultSetHeader>(
@@ -217,9 +241,11 @@ export async function upsertCheckinEmployee(
         employee.isAccAdmin ? 1 : 0,
       ],
     );
+
     const code = employeeCode(result.insertId);
     const username = checkinUsername || code;
     await releaseUsername(connection, username, result.insertId);
+
     await connection.query(
       'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
       [
