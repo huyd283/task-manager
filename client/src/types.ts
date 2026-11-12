@@ -58,6 +58,7 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  isAccAdmin?: boolean;
   jobTitle?: string;
   employeeCode?: string;
   department?: string;

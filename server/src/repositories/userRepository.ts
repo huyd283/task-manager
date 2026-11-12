@@ -1,4 +1,4 @@
-import type { ResultSetHeader, RowDataPacket } from 'mysql2';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../config/db';
@@ -42,6 +42,7 @@ export interface AuthUserRow extends RowDataPacket {
   role: string;
   job_title: string;
   is_active: number;
+  is_acc_admin: number;
 }
 
 export interface AssignableUserRow extends RowDataPacket {
@@ -72,6 +73,34 @@ function temporaryEmployeeCode(): string {
 
 function temporaryUsername(): string {
   return `TMP-${randomBytes(8).toString('hex')}`;
+}
+
+async function releaseUsername(
+  connection: PoolConnection,
+  username: string,
+  exceptUserId?: number,
+): Promise<void> {
+  const ownerQuery = exceptUserId === undefined
+    ? 'SELECT id FROM users WHERE username = ? LIMIT 1 FOR UPDATE'
+    : 'SELECT id FROM users WHERE username = ? AND id <> ? LIMIT 1 FOR UPDATE';
+  const [owners] = await connection.query<Array<RowDataPacket & { id: number }>>(
+    ownerQuery,
+    exceptUserId === undefined ? [username] : [username, exceptUserId],
+  );
+  const ownerId = owners[0]?.id;
+  if (ownerId === undefined) return;
+
+  let replacement: string;
+  do {
+    replacement = `conflict_${ownerId}_${randomBytes(8).toString('hex')}`;
+    const [existing] = await connection.query<Array<RowDataPacket & { id: number }>>(
+      'SELECT id FROM users WHERE username = ? LIMIT 1 FOR UPDATE',
+      [replacement],
+    );
+    if (existing.length === 0) break;
+  } while (true);
+
+  await connection.query('UPDATE users SET username = ? WHERE id = ?', [replacement, ownerId]);
 }
 
 function usernameFor(email: string, id: number): string {
@@ -111,48 +140,57 @@ export async function updateCheckinIdentity(
 export async function upsertCheckinEmployee(
   employee: CheckinEmployee,
 ): Promise<'inserted' | 'updated' | 'skipped-admin'> {
-  const [existingRows] = await pool.query<Array<RowDataPacket & { id: number; role: string }>>(
-    `SELECT id, role FROM users
-     WHERE email = ? OR partner_user_id = ?
-     ORDER BY (email = ?) DESC
-     LIMIT 1`,
-    [employee.email, employee.userId, employee.email],
-  );
-  const existing = existingRows[0];
-  if (existing?.role === 'admin') {
-    return 'skipped-admin';
-  }
-  const isActive = employee.status === 'ACTIVE' ? 1 : 0;
-  if (existing) {
-    await pool.query(
-      `UPDATE users
-       SET email = ?, name = ?, username = COALESCE(?, username),
-           job_title = COALESCE(?, job_title), department = COALESCE(?, department),
-           partner_user_id = ?, partner_status = ?, is_active = ?, is_acc_admin = ?
-       WHERE id = ?`,
-      [
-        employee.email,
-        employee.name,
-        employee.username,
-        employee.jobTitle,
-        employee.department,
-        employee.userId,
-        employee.status,
-        isActive,
-        employee.isAccAdmin ? 1 : 0,
-        existing.id,
-      ],
-    );
-    return 'updated';
-  }
-
-  const temporaryPassword = randomBytes(32).toString('hex');
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
-  const temporaryCode = temporaryEmployeeCode();
-  const temporaryUser = temporaryUsername();
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    const [partnerMatches] = await connection.query<Array<RowDataPacket & { id: number; role: string; username: string }>>(
+      'SELECT id, role, username FROM users WHERE partner_user_id = ? LIMIT 1 FOR UPDATE',
+      [employee.userId],
+    );
+    let existing = partnerMatches[0];
+    if (!existing) {
+      const [emailMatches] = await connection.query<Array<RowDataPacket & { id: number; role: string; username: string }>>(
+        'SELECT id, role, username FROM users WHERE email = ? LIMIT 1 FOR UPDATE',
+        [employee.email],
+      );
+      existing = emailMatches[0];
+    }
+
+    if (existing?.role === 'admin') {
+      await connection.commit();
+      return 'skipped-admin';
+    }
+
+    const isActive = employee.status === 'ACTIVE' ? 1 : 0;
+    if (existing) {
+      const username = employee.username?.trim() || existing.username;
+      await releaseUsername(connection, username, existing.id);
+      await connection.query(
+        `UPDATE users
+         SET email = ?, name = ?, username = ?,
+             job_title = COALESCE(?, job_title), department = COALESCE(?, department),
+             partner_user_id = ?, partner_status = ?, is_active = ?, is_acc_admin = ?
+         WHERE id = ?`,
+        [
+          employee.email,
+          employee.name,
+          username,
+          employee.jobTitle,
+          employee.department,
+          employee.userId,
+          employee.status,
+          isActive,
+          employee.isAccAdmin ? 1 : 0,
+          existing.id,
+        ],
+      );
+      await connection.commit();
+      return 'updated';
+    }
+
+    const temporaryPassword = randomBytes(32).toString('hex');
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     const [result] = await connection.query<ResultSetHeader>(
       `INSERT INTO users
          (name, email, username, password, role, employee_code, job_title, department,
@@ -161,9 +199,9 @@ export async function upsertCheckinEmployee(
       [
         employee.name,
         employee.email,
-        employee.username ?? temporaryUser,
+        temporaryUsername(),
         passwordHash,
-        temporaryCode,
+        temporaryEmployeeCode(),
         employee.jobTitle ?? 'Developer',
         employee.department ?? 'Phát triển Phần mềm',
         isActive,
@@ -172,11 +210,13 @@ export async function upsertCheckinEmployee(
         employee.isAccAdmin ? 1 : 0,
       ],
     );
+    const username = employee.username?.trim() || usernameFor(employee.email, result.insertId);
+    await releaseUsername(connection, username, result.insertId);
     await connection.query(
       'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
       [
         employeeCode(result.insertId),
-        employee.username ?? usernameFor(employee.email, result.insertId),
+        username,
         result.insertId,
       ],
     );
@@ -200,7 +240,7 @@ export async function findUserById(id: number): Promise<UserRow | null> {
 
 export async function findAuthUserById(id: number): Promise<AuthUserRow | null> {
   const [rows] = await pool.query<AuthUserRow[]>(
-    'SELECT id, name, email, role, job_title, is_active FROM users WHERE id = ? LIMIT 1',
+    'SELECT id, name, email, role, job_title, is_active, is_acc_admin FROM users WHERE id = ? LIMIT 1',
     [id],
   );
   return rows[0] ?? null;

@@ -4,6 +4,9 @@ import { PRIORITY_META, STATUS_META, type Project, type Task } from '../types';
 import toast from 'react-hot-toast';
 import SearchableSelect from '../components/common/SearchableSelect';
 import { Flag, Search } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import TaskDatePicker from '../components/common/TaskDatePicker';
+import { getDeadlineState } from '../types';
 
 interface Sprint {
   id: number;
@@ -17,6 +20,8 @@ interface Sprint {
 }
 
 export default function Sprints() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -101,6 +106,16 @@ export default function Sprints() {
       await loadProjectData();
     } catch (error) {
       toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể chuyển task về backlog.');
+    }
+  };
+
+  const saveTaskDate = async (task: Task, field: 'startDate' | 'dueDate', value: string | null) => {
+    try {
+      await api.put(`/tasks/${task.id}`, { [field]: value });
+      setTasks((current) => current.map((item) => item.id === task.id ? { ...item, [field]: value } : item));
+      toast.success(`${field === 'startDate' ? 'Ngày bắt đầu' : 'Ngày kết thúc'} đã được cập nhật.`);
+    } catch (error) {
+      toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật ngày công việc.');
     }
   };
 
@@ -228,6 +243,21 @@ export default function Sprints() {
                           </span>
                         )}
                       </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-semibold" onClick={(event) => event.stopPropagation()}>
+                        <TaskDatePicker
+                          label={`Ngày bắt đầu ${task.taskCode}`}
+                          value={task.startDate}
+                          editable={isAdmin || task.status === 'TODO'}
+                          onSave={(value) => saveTaskDate(task, 'startDate', value)}
+                        />
+                        <TaskDatePicker
+                          label={`Ngày kết thúc ${task.taskCode}`}
+                          value={task.dueDate}
+                          editable={isAdmin || task.status === 'TODO'}
+                          tone={getDeadlineState(task.dueDate, task.status) ?? 'default'}
+                          onSave={(value) => saveTaskDate(task, 'dueDate', value)}
+                        />
+                      </div>
                     </div>
                     <button disabled={!selectedSprint} onClick={() => void assignTask(task.id, selectedSprint)} className="shrink-0 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 disabled:opacity-40">Thêm</button>
                   </article>
@@ -241,6 +271,21 @@ export default function Sprints() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">{task.title}</p>
                   <p className="text-xs text-slate-400">{task.taskCode} · {task.status}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-semibold" onClick={(event) => event.stopPropagation()}>
+                    <TaskDatePicker
+                      label={`Ngày bắt đầu ${task.taskCode}`}
+                      value={task.startDate}
+                      editable={isAdmin || task.status === 'TODO'}
+                      onSave={(value) => saveTaskDate(task, 'startDate', value)}
+                    />
+                    <TaskDatePicker
+                      label={`Ngày kết thúc ${task.taskCode}`}
+                      value={task.dueDate}
+                      editable={isAdmin || task.status === 'TODO'}
+                      tone={getDeadlineState(task.dueDate, task.status) ?? 'default'}
+                      onSave={(value) => saveTaskDate(task, 'dueDate', value)}
+                    />
+                  </div>
                 </div>
                 <button onClick={() => void moveToBacklog(task)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Backlog</button>
               </article>

@@ -25,7 +25,13 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     if (!user || !user.is_active) {
       return res.status(401).json({ message: 'Account is inactive or no longer exists' });
     }
-    req.user = { id: user.id, email: user.email, role: user.role, jobTitle: user.job_title };
+    req.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      jobTitle: user.job_title,
+      isAccAdmin: Boolean(user.is_acc_admin),
+    };
     return next();
   } catch (error) {
     return next(error);

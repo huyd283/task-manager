@@ -2,16 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult, type DroppableProvided, type DroppableStateSnapshot } from '@hello-pangea/dnd';
 import { api } from '../api/client';
 import { TASK_STATUSES, STATUS_META, STATUS_TRANSITIONS, TASK_PRIORITIES, PRIORITY_META, getDeadlineState, type Project, type Task, type TaskStatus, type TaskPriority } from '../types';
-import { Plus, Calendar, AlertCircle, Search, Flag, Clock3, CircleCheck } from 'lucide-react';
+import { Plus, AlertCircle, Search, Flag, Clock3, CircleCheck } from 'lucide-react';
 import TaskModal from '../components/TaskModal';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import SearchableSelect, { normalizeSearchText } from './common/SearchableSelect';
+import TaskDatePicker from './common/TaskDatePicker';
+import StartTaskModal from './common/StartTaskModal';
 
 export default function KanbanBoard() {
   const { user } = useAuth();
-  const canViewSystem = user?.role === 'admin' || user?.jobTitle === 'Project Lead';
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
+  const canViewSystem = isAdmin || user?.jobTitle === 'Project Lead';
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState('');
@@ -24,6 +26,7 @@ export default function KanbanBoard() {
   const [dragging, setDragging] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [pendingStart, setPendingStart] = useState<Task | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const effectiveScope = isAdmin ? 'system' : scopeFilter;
   const assigneeOptions = [...new Set(tasks.flatMap((task) => task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : []))].sort();
@@ -109,12 +112,12 @@ export default function KanbanBoard() {
       toast.error('Không tìm thấy công việc hoặc trạng thái đích không hợp lệ.');
       return;
     }
-    if (!STATUS_TRANSITIONS[task.status].includes(newStatus)) {
+    if (!isAdmin && !STATUS_TRANSITIONS[task.status].includes(newStatus)) {
       toast.error(`Không thể chuyển trực tiếp từ ${STATUS_META[task.status].label} sang ${STATUS_META[newStatus].label}.`);
       return;
     }
-    if (newStatus === 'IN_PROGRESS' && (!task.startDate || !task.dueDate)) {
-      toast.error('Hãy điền ngày bắt đầu và hạn chót trước khi chuyển task sang Đang thực hiện.');
+    if (!isAdmin && task.status === 'TODO' && newStatus === 'IN_PROGRESS') {
+      setPendingStart(task);
       return;
     }
 
@@ -131,6 +134,29 @@ export default function KanbanBoard() {
       // Nếu lỗi thì tải lại dữ liệu cũ
       toast.error((err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.');
       void load();
+    }
+  };
+
+  const saveTaskDate = async (task: Task, field: 'startDate' | 'dueDate', value: string | null) => {
+    try {
+      await api.put(`/tasks/${task.id}`, { [field]: value });
+      setTasks((current) => current.map((item) => item.id === task.id ? { ...item, [field]: value } : item));
+      toast.success(`${field === 'startDate' ? 'Ngày bắt đầu' : 'Ngày kết thúc'} đã được cập nhật.`);
+    } catch (error) {
+      toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật ngày công việc.');
+    }
+  };
+
+  const startTaskWithDates = async (task: Task, dates: { startDate: string; dueDate: string }) => {
+    try {
+      await api.patch(`/tasks/${task.id}/status`, { status: 'IN_PROGRESS', ...dates });
+      setPendingStart(null);
+      toast.success(`Đã chuyển công việc sang ${STATUS_META.IN_PROGRESS.label}.`);
+      void load();
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.';
+      toast.error(message);
+      throw new Error(message);
     }
   };
 
@@ -368,25 +394,26 @@ export default function KanbanBoard() {
                                   })()}
 
                                   {/* Due Date */}
-                                  {task.dueDate && (
-                                    (() => {
-                                      const deadlineState = getDeadlineState(task.dueDate, task.status);
-                                      return (
-                                        <div className={`flex items-center gap-1 font-semibold ${
-                                          deadlineState === 'overdue' ? 'text-rose-600 font-bold' :
-                                            deadlineState === 'soon' ? 'text-amber-600 font-bold' : 'text-slate-400'
-                                        }`}>
-                                          <Calendar size={12} />
-                                          <span>{task.dueDate.slice(5, 10)}</span>
-                                          {deadlineState && (
-                                            <span className={`rounded px-1 py-0.5 text-[9px] ${
-                                              deadlineState === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                                            }`}>{deadlineState === 'overdue' ? 'Quá hạn' : 'Sắp hạn'}</span>
-                                          )}
-                                        </div>
-                                      );
-                                    })()
-                                  )}
+                                  <div className="flex flex-wrap items-center justify-end gap-1 font-semibold" onClick={(event) => event.stopPropagation()}>
+                                    <TaskDatePicker
+                                      label={`Ngày bắt đầu ${task.taskCode}`}
+                                      value={task.startDate}
+                                      editable={isAdmin || task.status === 'TODO'}
+                                      onSave={(value) => saveTaskDate(task, 'startDate', value)}
+                                    />
+                                    <TaskDatePicker
+                                      label={`Ngày kết thúc ${task.taskCode}`}
+                                      value={task.dueDate}
+                                      editable={isAdmin || task.status === 'TODO'}
+                                      tone={getDeadlineState(task.dueDate, task.status) ?? 'default'}
+                                      onSave={(value) => saveTaskDate(task, 'dueDate', value)}
+                                    />
+                                    {getDeadlineState(task.dueDate, task.status) && (
+                                      <span className={`rounded px-1 py-0.5 text-[9px] ${
+                                        getDeadlineState(task.dueDate, task.status) === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                                      }`}>{getDeadlineState(task.dueDate, task.status) === 'overdue' ? 'Quá hạn' : 'Sắp hạn'}</span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-1 text-[10px] font-medium text-slate-400">
                                   <Clock3 size={11} />
@@ -416,6 +443,13 @@ export default function KanbanBoard() {
             setModalOpen(false);
             void load();
           }}
+        />
+      )}
+      {pendingStart && (
+        <StartTaskModal
+          task={pendingStart}
+          onCancel={() => setPendingStart(null)}
+          onConfirm={(dates) => startTaskWithDates(pendingStart, dates)}
         />
       )}
     </div>

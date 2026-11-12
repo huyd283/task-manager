@@ -18,10 +18,14 @@ function validDate(value: unknown): value is string {
     new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
+function canManageTasks(req: Request) {
+  return req.user?.role === 'admin' || req.user?.isAccAdmin === true || req.user?.jobTitle === 'Project Lead';
+}
+
 async function taskForUser(req: Request, rawId = req.params.id) {
   const task = await taskRepo.getTaskById(idParam(rawId));
   if (!task) throw new HttpError(404, 'Task not found');
-  if (req.user?.role !== 'admin' && req.user?.jobTitle !== 'Project Lead' &&
+  if (!canManageTasks(req) &&
     !(await projectRepo.isProjectMember(task.projectId, req.user!.id))) {
     throw new HttpError(404, 'Task not found');
   }
@@ -31,7 +35,7 @@ async function taskForUser(req: Request, rawId = req.params.id) {
 async function projectForUser(req: Request, rawId = req.params.projectId) {
   const projectId = idParam(rawId);
   if (!(await projectRepo.projectExists(projectId))) throw new HttpError(404, 'Project not found');
-  if (req.user?.role !== 'admin' && req.user?.jobTitle !== 'Project Lead' &&
+  if (!canManageTasks(req) &&
     !(await projectRepo.isProjectMember(projectId, req.user!.id))) {
     throw new HttpError(404, 'Project not found');
   }
@@ -330,7 +334,7 @@ export async function exportTasks(req: Request, res: Response) {
     clauses.push('EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = ?)');
     params.push(assigneeId);
   }
-  if (req.user?.role !== 'admin' && req.user?.jobTitle !== 'Project Lead') {
+  if (!canManageTasks(req)) {
     clauses.push('EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = t.project_id AND pm.user_id = ?)');
     params.push(req.user!.id);
   }

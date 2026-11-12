@@ -54,8 +54,12 @@ function parseAssigneeIds(body: Record<string, unknown>, isPresent: boolean): nu
   return [Number(id)];
 }
 
+function isTaskAdmin(req: Request) {
+  return req.user?.role === 'admin' || req.user?.isAccAdmin === true;
+}
+
 function canManageProjects(req: Request) {
-  return req.user?.role === 'admin' || req.user?.jobTitle === 'Project Lead';
+  return isTaskAdmin(req) || req.user?.jobTitle === 'Project Lead';
 }
 
 async function assertProjectAccess(req: Request, projectId: number) {
@@ -101,12 +105,17 @@ async function validateStatusTransition(
   taskId: number,
   proposedHours?: number,
   proposedAcceptance?: string | null,
+  bypassValidation = false,
+  proposedDates?: { startDate: string | null; dueDate: string | null },
 ) {
   if (status === existing.status) return;
+  if (bypassValidation) return;
   if (!ALLOWED_TRANSITIONS[existing.status].includes(status)) {
     throw new HttpError(409, `Cannot transition task from ${existing.status} to ${status}`);
   }
-  if (status === 'IN_PROGRESS' && (!existing.startDate || !existing.dueDate)) {
+  const startDate = proposedDates ? proposedDates.startDate : existing.startDate;
+  const dueDate = proposedDates ? proposedDates.dueDate : existing.dueDate;
+  if (status === 'IN_PROGRESS' && (!startDate || !dueDate)) {
     throw new HttpError(400, 'Add both a start date and a due date before moving this task to In Progress');
   }
   if (status === 'REVIEW' || status === 'DONE' || status === 'GOLIVE') {
@@ -222,28 +231,48 @@ export async function update(req: Request, res: Response) {
   await assertTaskAccess(req, existing);
 
   const body = { ...(req.body ?? {}) };
+  const isAdmin = isTaskAdmin(req);
   if (Object.hasOwn(body, 'actualDate') && body.actualDate !== null) {
-    throw new HttpError(400, 'Completion date is recorded automatically when the task is marked Done');
+    if (!isAdmin) {
+      throw new HttpError(400, 'Completion date is recorded automatically when the task is marked Done');
+    }
   }
-  delete body.actualDate;
+  if (isAdmin && Object.hasOwn(body, 'actualDate')) {
+    body.actualDate = body.actualDate === '' || body.actualDate === null
+      ? null
+      : assertDateFilter(body.actualDate, 'actualDate');
+  } else {
+    delete body.actualDate;
+  }
   for (const dateField of ['estimatedDate'] as const) {
     if (Object.hasOwn(body, dateField)) {
-      const requestedDate = body[dateField] === '' ? null : body[dateField];
-      if (requestedDate !== existing[dateField]) {
+      const requestedDate = body[dateField] === '' || body[dateField] === null
+        ? null
+        : assertDateFilter(body[dateField], dateField);
+      if (!isAdmin && requestedDate !== existing[dateField]) {
         throw new HttpError(400, `${dateField} cannot be changed after task creation`);
       }
-      delete body[dateField];
+      body[dateField] = isAdmin ? requestedDate : undefined;
+      if (!isAdmin) delete body[dateField];
     }
   }
   const proposedStatus = body.status === undefined ? existing.status : assertStatus(body.status);
+  const proposedDates = {
+    startDate: Object.hasOwn(body, 'startDate')
+      ? (body.startDate === '' || body.startDate === null ? null : assertDateFilter(body.startDate, 'startDate'))
+      : existing.startDate,
+    dueDate: Object.hasOwn(body, 'dueDate')
+      ? (body.dueDate === '' || body.dueDate === null ? null : assertDateFilter(body.dueDate, 'dueDate'))
+      : existing.dueDate,
+  };
   for (const dateField of ['startDate', 'dueDate'] as const) {
     if (!Object.hasOwn(body, dateField)) continue;
-    const rawDate = body[dateField];
-    const requestedDate = rawDate === '' || rawDate === null
-      ? null
-      : assertDateFilter(rawDate, dateField);
     const currentDate = existing[dateField]?.slice(0, 10) ?? null;
-    if (requestedDate !== currentDate && proposedStatus !== 'TODO') {
+    const requestedDate = proposedDates[dateField];
+    const canChangeAsMember =
+      (existing.status === 'TODO' && (proposedStatus === 'TODO' || proposedStatus === 'IN_PROGRESS')) ||
+      (existing.status === 'PENDING' && proposedStatus === 'TODO');
+    if (!isAdmin && requestedDate !== currentDate && !canChangeAsMember) {
       throw new HttpError(400, `${dateField} can only be changed while the task is TODO`);
     }
     body[dateField] = requestedDate;
@@ -263,6 +292,8 @@ export async function update(req: Request, res: Response) {
       id,
       typeof body.loggedHours === 'number' ? body.loggedHours : undefined,
       typeof body.acceptanceNotes === 'string' || body.acceptanceNotes === null ? body.acceptanceNotes : undefined,
+      isAdmin,
+      proposedDates,
     );
   }
   if (body.priority !== undefined) assertPriority(body.priority);
@@ -301,20 +332,39 @@ export async function update(req: Request, res: Response) {
     delete body.taskCode;
   }
 
-  const task = await taskRepo.updateTask(id, body, req.user!.id);
+  const task = await taskRepo.updateTask(id, body, req.user!.id, isAdmin);
   res.json({ data: task });
 }
 
 export async function updateStatus(req: Request, res: Response) {
   const id = parseId(req.params.id);
-  const status = assertStatus((req.body ?? {}).status);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const status = assertStatus(body.status);
 
   const existing = await taskRepo.getTaskById(id);
   if (!existing) throw new HttpError(404, 'Task not found');
   await assertTaskAccess(req, existing);
 
-  await validateStatusTransition(existing, status, id);
-  const task = await taskRepo.updateTaskStatus(id, status, req.user!.id);
+  const isAdmin = isTaskAdmin(req);
+  const dateUpdates: { startDate?: string | null; dueDate?: string | null } = {};
+  for (const field of ['startDate', 'dueDate'] as const) {
+    if (!Object.hasOwn(body, field)) continue;
+    const value = body[field] === '' || body[field] === null
+      ? null
+      : assertDateFilter(body[field], field);
+    const currentValue = existing[field]?.slice(0, 10) ?? null;
+    const canSetAtStart = existing.status === 'TODO' && status === 'IN_PROGRESS';
+    if (!isAdmin && value !== currentValue && !canSetAtStart) {
+      throw new HttpError(400, `${field} can only be changed while the task is TODO`);
+    }
+    dateUpdates[field] = value;
+  }
+  const proposedDates = {
+    startDate: dateUpdates.startDate === undefined ? existing.startDate : dateUpdates.startDate,
+    dueDate: dateUpdates.dueDate === undefined ? existing.dueDate : dateUpdates.dueDate,
+  };
+  await validateStatusTransition(existing, status, id, undefined, undefined, isAdmin, proposedDates);
+  const task = await taskRepo.updateTask(id, { status, ...dateUpdates }, req.user!.id, isAdmin);
   res.json({ data: task });
 }
 
@@ -422,14 +472,14 @@ export async function deleteAttachment(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  if (req.user?.role !== 'admin') {
+  if (!isTaskAdmin(req)) {
     throw new HttpError(403, 'Only administrators can delete tasks');
   }
   const id = parseId(req.params.id);
   const existing = await taskRepo.getTaskById(id);
   if (!existing) throw new HttpError(404, 'Task not found');
   await assertTaskAccess(req, existing);
-  const ok = await taskRepo.deleteTask(id, req.user.id);
+  const ok = await taskRepo.deleteTask(id, req.user!.id);
   if (!ok) throw new HttpError(404, 'Task not found');
   res.status(204).send();
 }

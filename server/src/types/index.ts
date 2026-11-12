@@ -61,6 +61,7 @@ export interface AuthUser {
 export interface AuthenticatedUser extends AuthUser {
   role: string;
   jobTitle?: string;
+  isAccAdmin?: boolean;
 }
 
 export interface CreateTaskInput {

@@ -234,7 +234,12 @@ export interface TaskHistoryEntry {
   timestamp: string;
 }
 
-export async function updateTask(id: number, input: UpdateTaskInput, userId: number): Promise<Task | null> {
+export async function updateTask(
+  id: number,
+  input: UpdateTaskInput,
+  userId: number,
+  bypassValidation = false,
+): Promise<Task | null> {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -253,14 +258,18 @@ export async function updateTask(id: number, input: UpdateTaskInput, userId: num
         dateValue(input[field]) !== dateValue(current[field === 'startDate' ? 'start_date' : 'due_date']),
     );
     const staysTodo = current.status === 'TODO' && (input.status === undefined || input.status === 'TODO');
+    const startsWork = current.status === 'TODO' && input.status === 'IN_PROGRESS';
     const returnsToTodo = current.status === 'PENDING' && input.status === 'TODO';
-    if (dateChanges && !staysTodo && !returnsToTodo) {
+    if (!bypassValidation && dateChanges && !staysTodo && !startsWork && !returnsToTodo) {
       throw new HttpError(400, 'Start date and due date can only be changed while the task is TODO');
     }
-    if (input.status === 'IN_PROGRESS' && current.status !== 'IN_PROGRESS' && (!current.start_date || !current.due_date)) {
+    const nextStartDate = 'startDate' in input ? input.startDate : current.start_date;
+    const nextDueDate = 'dueDate' in input ? input.dueDate : current.due_date;
+    if (!bypassValidation && input.status === 'IN_PROGRESS' && current.status !== 'IN_PROGRESS' &&
+      (!nextStartDate || !nextDueDate)) {
       throw new HttpError(400, 'Add both a start date and a due date before moving this task to In Progress');
     }
-    if (input.status === 'REVIEW' || input.status === 'DONE' || input.status === 'GOLIVE') {
+    if (!bypassValidation && (input.status === 'REVIEW' || input.status === 'DONE' || input.status === 'GOLIVE')) {
       const [incomplete] = await connection.query<RowDataPacket[]>(
         "SELECT id FROM task_subtasks WHERE task_id = ? AND status <> 'DONE' LIMIT 1 FOR UPDATE",
         [id],

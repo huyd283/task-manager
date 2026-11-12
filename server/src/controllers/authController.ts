@@ -150,7 +150,14 @@ export async function login(req: Request, res: Response) {
   const token = signToken({ id: user.id, email: user.email });
   res.json({
     token,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, jobTitle: user.job_title },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      jobTitle: user.job_title,
+      isAccAdmin: Boolean(user.is_acc_admin),
+    },
   });
 }
 
@@ -166,6 +173,13 @@ export async function me(req: Request, res: Response) {
   }
 
   res.json({
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, jobTitle: user.job_title },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      jobTitle: user.job_title,
+      isAccAdmin: Boolean(user.is_acc_admin),
+    },
   });
 }

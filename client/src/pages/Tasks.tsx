@@ -19,7 +19,6 @@ import {
   Plus,
   Edit3,
   Trash2,
-  Calendar,
   Folder,
   AlertCircle,
   AlertTriangle,
@@ -35,19 +34,15 @@ import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
 import SearchableSelect from '../components/common/SearchableSelect';
 import { useAuth } from '../context/AuthContext';
+import TaskDatePicker from '../components/common/TaskDatePicker';
+import StartTaskModal from '../components/common/StartTaskModal';
 
 type AlertFilter = 'overdue' | 'soon' | 'not-started';
 type TaskSortField = 'taskCode' | 'title' | 'startDate' | 'dueDate';
 
-function formatTaskDate(value: string | null) {
-  if (!value) return '-';
-  const [year, month, day] = value.slice(0, 10).split('-');
-  return year && month && day ? `${day}/${month}/${year}` : '-';
-}
-
 export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
@@ -67,6 +62,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
+  const [pendingStart, setPendingStart] = useState<Task | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,8 +122,8 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   }, [alertFilter, assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter, searchText, statusFilter]);
 
   const changeStatus = async (task: Task, status: TaskStatus) => {
-    if (status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS' && (!task.startDate || !task.dueDate)) {
-      toast.error('Hãy điền ngày bắt đầu và hạn chót trước khi chuyển task sang Đang thực hiện.');
+    if (!isAdmin && status === 'IN_PROGRESS' && task.status === 'TODO') {
+      setPendingStart(task);
       return;
     }
     // Optimistic update
@@ -140,6 +136,33 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
     } catch (error) {
       toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.', { id: toastId });
       void load();
+    }
+  };
+
+  const saveTaskDates = async (
+    task: Task,
+    field: 'startDate' | 'dueDate',
+    value: string | null,
+  ) => {
+    try {
+      await api.put(`/tasks/${task.id}`, { [field]: value });
+      setTasks((current) => current.map((item) => item.id === task.id ? { ...item, [field]: value } : item));
+      toast.success(`${field === 'startDate' ? 'Ngày bắt đầu' : 'Ngày kết thúc'} đã được cập nhật.`);
+    } catch (error) {
+      toast.error((error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật ngày công việc.');
+    }
+  };
+
+  const startTaskWithDates = async (task: Task, dates: { startDate: string; dueDate: string }) => {
+    try {
+      await api.patch(`/tasks/${task.id}/status`, { status: 'IN_PROGRESS', ...dates });
+      toast.success(`Đã chuyển ${task.taskCode} sang ${STATUS_META.IN_PROGRESS.label}.`);
+      setPendingStart(null);
+      void load();
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không thể cập nhật trạng thái công việc.';
+      toast.error(message);
+      throw new Error(message);
     }
   };
 
@@ -563,7 +586,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                             value={task.status}
                             onChange={(value) => void changeStatus(task, value as TaskStatus)}
                             className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] font-bold"
-                            options={[task.status, ...STATUS_TRANSITIONS[task.status]].map((status) => ({
+                            options={(isAdmin ? TASK_STATUSES : [task.status, ...STATUS_TRANSITIONS[task.status]]).map((status) => ({
                               value: status,
                               label: STATUS_META[status].label,
                             }))}
@@ -572,28 +595,25 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
                       </div>
                     </td>
 
-                    <td className="whitespace-nowrap px-3 py-3.5 align-middle font-semibold text-slate-600">
-                      {formatTaskDate(task.startDate)}
+                    <td className="whitespace-nowrap px-3 py-3.5 align-middle font-semibold">
+                      <TaskDatePicker
+                        label={`Ngày bắt đầu ${task.taskCode}`}
+                        value={task.startDate}
+                        editable={isAdmin || task.status === 'TODO'}
+                        onSave={(value) => saveTaskDates(task, 'startDate', value)}
+                      />
                     </td>
 
                     {/* Hạn chót */}
-                    <td className="px-3 py-3.5 align-middle">
+                    <td className="px-3 py-3.5 align-middle" onClick={(event) => event.stopPropagation()}>
                       <div className="flex items-center gap-1.5 whitespace-nowrap">
-                        <Calendar
-                          size={13}
-                          className={`shrink-0 ${deadlineState === 'overdue' ? 'text-rose-500 animate-bounce' : deadlineState === 'soon' ? 'text-amber-500' : 'text-slate-400'}`}
+                        <TaskDatePicker
+                          label={`Ngày kết thúc ${task.taskCode}`}
+                          value={task.dueDate}
+                          editable={isAdmin || task.status === 'TODO'}
+                          tone={deadlineState ?? 'default'}
+                          onSave={(value) => saveTaskDates(task, 'dueDate', value)}
                         />
-                        <span
-                          className={`whitespace-nowrap font-semibold ${
-                            deadlineState === 'overdue'
-                              ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200/60'
-                              : deadlineState === 'soon'
-                                ? 'text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60'
-                                : 'text-slate-600'
-                          }`}
-                        >
-                          {formatTaskDate(task.dueDate)}
-                        </span>
                         {deadlineState && (
                           <span className={`whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
                             deadlineState === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
@@ -683,6 +703,14 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
             setModalOpen(false);
             void load();
           }}
+        />
+      )}
+
+      {pendingStart && (
+        <StartTaskModal
+          task={pendingStart}
+          onCancel={() => setPendingStart(null)}
+          onConfirm={(dates) => startTaskWithDates(pendingStart, dates)}
         />
       )}
 

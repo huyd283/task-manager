@@ -12,7 +12,7 @@ function parseId(raw: string): number {
 }
 
 function canManage(req: Request) {
-  return req.user?.role === 'admin' || req.user?.jobTitle === 'Project Lead';
+  return req.user?.role === 'admin' || req.user?.isAccAdmin === true || req.user?.jobTitle === 'Project Lead';
 }
 
 function requireManager(req: Request) {

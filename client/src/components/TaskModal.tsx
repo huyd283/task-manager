@@ -5,6 +5,7 @@ import SearchableSelect, { normalizeSearchText } from './common/SearchableSelect
 import toast from 'react-hot-toast';
 import {
   TASK_PRIORITIES,
+  TASK_STATUSES,
   STATUS_META,
   PRIORITY_META,
   getTaskPriority,
@@ -163,6 +164,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const [assigneeSearch, setAssigneeSearch] = useState('');
   const [assigneeDepartment, setAssigneeDepartment] = useState('');
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [history, setHistory] = useState<TaskHistoryEntry[]>([]);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -518,7 +520,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       toast.error('Vui lòng chọn dự án.');
       return;
     }
-    if (isEdit && task && form.status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS' &&
+    if (!isAdmin && isEdit && task && form.status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS' &&
       (!form.startDate || !form.dueDate)) {
       const message = 'Vui lòng điền cả ngày bắt đầu và hạn chót trước khi chuyển sang Đang thực hiện.';
       setError(message);
@@ -533,7 +535,10 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       if (isEdit && task) {
         const updatePayload = { ...payload };
         delete updatePayload.estimatedDate;
-        if (form.status !== 'TODO') {
+        const canUpdateDates = isAdmin || task.status === 'TODO' ||
+          (task.status === 'PENDING' && form.status === 'TODO') ||
+          (task.status === 'TODO' && form.status === 'IN_PROGRESS');
+        if (!canUpdateDates) {
           delete updatePayload.startDate;
           delete updatePayload.dueDate;
         }
@@ -1081,7 +1086,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     value={form.status}
                     onChange={(status) => update('status', status)}
                     clearable={false}
-                    options={[form.status, ...STATUS_TRANSITIONS[form.status]].map((status) => ({ value: status, label: STATUS_META[status].label }))}
+                    options={(isAdmin ? TASK_STATUSES : [form.status, ...STATUS_TRANSITIONS[form.status]]).map((status) => ({ value: status, label: STATUS_META[status].label }))}
                   />
                 </label>
                 <label className="block text-[11px] font-bold text-slate-600">Mức độ ưu tiên
@@ -1140,7 +1145,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     className={`${inputClass} mt-1 bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                     value={form.startDate}
                     onChange={(event) => update('startDate', event.target.value)}
-                    disabled={form.status !== 'TODO'}
+                    disabled={isEdit && !isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO')}
                   />
                 </label>
                 <label className="block text-[10px] font-bold text-rose-600">Hạn chót
@@ -1149,7 +1154,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     className={`${inputClass} mt-1 bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                     value={form.dueDate}
                     onChange={(event) => update('dueDate', event.target.value)}
-                    disabled={form.status !== 'TODO'}
+                    disabled={isEdit && !isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO')}
                   />
                 </label>
                 <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -1162,7 +1167,8 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                         : 'Tự động ghi nhận khi chuyển sang Done'}
                   </p>
                 </div>
-                {form.status !== 'TODO' && <p className="text-[10px] text-slate-400">Chỉ có thể thay đổi ngày khi công việc ở trạng thái To Do.</p>}
+                {!isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO') &&
+                  <p className="text-[10px] text-slate-400">Chỉ có thể thay đổi ngày khi công việc ở trạng thái To Do.</p>}
               </section>
               <button
                 type="submit"
