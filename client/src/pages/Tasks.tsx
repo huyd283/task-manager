@@ -122,7 +122,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   }, [alertFilter, assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter, searchText, statusFilter]);
 
   const changeStatus = async (task: Task, status: TaskStatus) => {
-    if (!isAdmin && status === 'IN_PROGRESS' && task.status === 'TODO') {
+    if (!isAdmin && status === 'IN_PROGRESS' && task.status !== 'IN_PROGRESS') {
       setPendingStart(task);
       return;
     }

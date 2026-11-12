@@ -271,6 +271,7 @@ export async function update(req: Request, res: Response) {
     const requestedDate = proposedDates[dateField];
     const canChangeAsMember =
       (existing.status === 'TODO' && (proposedStatus === 'TODO' || proposedStatus === 'IN_PROGRESS')) ||
+      (existing.status !== 'IN_PROGRESS' && proposedStatus === 'IN_PROGRESS') ||
       (existing.status === 'PENDING' && proposedStatus === 'TODO');
     if (!isAdmin && requestedDate !== currentDate && !canChangeAsMember) {
       throw new HttpError(400, `${dateField} can only be changed while the task is TODO`);
@@ -353,7 +354,7 @@ export async function updateStatus(req: Request, res: Response) {
       ? null
       : assertDateFilter(body[field], field);
     const currentValue = existing[field]?.slice(0, 10) ?? null;
-    const canSetAtStart = existing.status === 'TODO' && status === 'IN_PROGRESS';
+    const canSetAtStart = existing.status !== 'IN_PROGRESS' && status === 'IN_PROGRESS';
     if (!isAdmin && value !== currentValue && !canSetAtStart) {
       throw new HttpError(400, `${field} can only be changed while the task is TODO`);
     }

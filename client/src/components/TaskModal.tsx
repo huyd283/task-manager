@@ -174,6 +174,9 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const [attachmentError, setAttachmentError] = useState('');
   const [previewAttachment, setPreviewAttachment] = useState<TaskAttachment | null>(null);
   const isEdit = Boolean(task);
+  const canEditTaskDates = !isEdit || isAdmin || task?.status === 'TODO' ||
+    (task?.status === 'PENDING' && form.status === 'TODO') ||
+    (task?.status !== 'IN_PROGRESS' && form.status === 'IN_PROGRESS');
 
   useEffect(() => {
     if (!task || activeTab !== 'comments') return;
@@ -474,13 +477,6 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   }, [form.projectId]);
 
   const update = (field: keyof FormState, value: string) => {
-    if (field === 'status' && value === 'IN_PROGRESS' && task?.status !== 'IN_PROGRESS' &&
-      (!form.startDate || !form.dueDate)) {
-      const message = 'Vui lòng điền cả ngày bắt đầu và hạn chót trước khi chuyển sang Đang thực hiện.';
-      setError(message);
-      toast.error(message);
-      return;
-    }
     setError('');
     setForm((prev) => ({ ...prev, [field]: value }) as FormState);
   };
@@ -535,10 +531,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
       if (isEdit && task) {
         const updatePayload = { ...payload };
         delete updatePayload.estimatedDate;
-        const canUpdateDates = isAdmin || task.status === 'TODO' ||
-          (task.status === 'PENDING' && form.status === 'TODO') ||
-          (task.status === 'TODO' && form.status === 'IN_PROGRESS');
-        if (!canUpdateDates) {
+        if (!canEditTaskDates) {
           delete updatePayload.startDate;
           delete updatePayload.dueDate;
         }
@@ -827,10 +820,10 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">Bắt đầu</label>
                 <input
                   type="date"
-                  className={inputClass}
+                  className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                   value={form.startDate}
                   onChange={(e) => update('startDate', e.target.value)}
-                  disabled={isEdit}
+                  disabled={!canEditTaskDates}
                 />
               </div>
               <div>
@@ -847,9 +840,10 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                 <label className="block text-[11px] font-bold text-rose-600 mb-1">Hạn chót</label>
                 <input
                   type="date"
-                  className={inputClass}
+                  className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                   value={form.dueDate}
                   onChange={(e) => update('dueDate', e.target.value)}
+                  disabled={!canEditTaskDates}
                 />
               </div>
               <div>
@@ -1145,7 +1139,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     className={`${inputClass} mt-1 bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                     value={form.startDate}
                     onChange={(event) => update('startDate', event.target.value)}
-                    disabled={isEdit && !isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO')}
+                    disabled={!canEditTaskDates}
                   />
                 </label>
                 <label className="block text-[10px] font-bold text-rose-600">Hạn chót
@@ -1154,7 +1148,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                     className={`${inputClass} mt-1 bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
                     value={form.dueDate}
                     onChange={(event) => update('dueDate', event.target.value)}
-                    disabled={isEdit && !isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO')}
+                    disabled={!canEditTaskDates}
                   />
                 </label>
                 <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -1167,8 +1161,8 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
                         : 'Tự động ghi nhận khi chuyển sang Done'}
                   </p>
                 </div>
-                {!isAdmin && task?.status !== 'TODO' && !(task?.status === 'PENDING' && form.status === 'TODO') &&
-                  <p className="text-[10px] text-slate-400">Chỉ có thể thay đổi ngày khi công việc ở trạng thái To Do.</p>}
+                {!canEditTaskDates &&
+                  <p className="text-[10px] text-slate-400">Có thể cập nhật ngày khi công việc ở To Do hoặc trong lúc chuyển sang Đang thực hiện.</p>}
               </section>
               <button
                 type="submit"

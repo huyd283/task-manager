@@ -258,7 +258,7 @@ export async function updateTask(
         dateValue(input[field]) !== dateValue(current[field === 'startDate' ? 'start_date' : 'due_date']),
     );
     const staysTodo = current.status === 'TODO' && (input.status === undefined || input.status === 'TODO');
-    const startsWork = current.status === 'TODO' && input.status === 'IN_PROGRESS';
+    const startsWork = current.status !== 'IN_PROGRESS' && input.status === 'IN_PROGRESS';
     const returnsToTodo = current.status === 'PENDING' && input.status === 'TODO';
     if (!bypassValidation && dateChanges && !staysTodo && !startsWork && !returnsToTodo) {
       throw new HttpError(400, 'Start date and due date can only be changed while the task is TODO');

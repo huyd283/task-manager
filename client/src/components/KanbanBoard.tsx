@@ -116,7 +116,7 @@ export default function KanbanBoard() {
       toast.error(`Không thể chuyển trực tiếp từ ${STATUS_META[task.status].label} sang ${STATUS_META[newStatus].label}.`);
       return;
     }
-    if (!isAdmin && task.status === 'TODO' && newStatus === 'IN_PROGRESS') {
+    if (!isAdmin && task.status !== 'IN_PROGRESS' && newStatus === 'IN_PROGRESS') {
       setPendingStart(task);
       return;
     }
