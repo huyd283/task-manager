@@ -124,6 +124,14 @@ export async function findUserByUsername(username: string): Promise<UserRow | nu
   return rows[0] ?? null;
 }
 
+export async function findUserByEmployeeCode(employeeCode: string): Promise<UserRow | null> {
+  const [rows] = await pool.query<UserRow[]>(
+    'SELECT * FROM users WHERE employee_code = ? LIMIT 1',
+    [employeeCode],
+  );
+  return rows[0] ?? null;
+}
+
 export async function updateCheckinIdentity(
   email: string,
   partnerUserId: number,
@@ -144,18 +152,16 @@ export async function upsertCheckinEmployee(
   try {
     await connection.beginTransaction();
 
-    const [partnerMatches] = await connection.query<Array<RowDataPacket & { id: number; role: string; username: string }>>(
-      'SELECT id, role, username FROM users WHERE partner_user_id = ? LIMIT 1 FOR UPDATE',
-      [employee.userId],
+    const email = employee.email.trim().toLowerCase();
+    const [emailMatches] = await connection.query<Array<RowDataPacket & {
+      id: number;
+      role: string;
+      employee_code: string;
+    }>>(
+      'SELECT id, role, employee_code FROM users WHERE email = ? LIMIT 1 FOR UPDATE',
+      [email],
     );
-    let existing = partnerMatches[0];
-    if (!existing) {
-      const [emailMatches] = await connection.query<Array<RowDataPacket & { id: number; role: string; username: string }>>(
-        'SELECT id, role, username FROM users WHERE email = ? LIMIT 1 FOR UPDATE',
-        [employee.email],
-      );
-      existing = emailMatches[0];
-    }
+    const existing = emailMatches[0];
 
     if (existing?.role === 'admin') {
       await connection.commit();
@@ -163,8 +169,9 @@ export async function upsertCheckinEmployee(
     }
 
     const isActive = employee.status === 'ACTIVE' ? 1 : 0;
+    const checkinUsername = employee.username?.trim();
     if (existing) {
-      const username = employee.username?.trim() || existing.username;
+      const username = checkinUsername || existing.employee_code;
       await releaseUsername(connection, username, existing.id);
       await connection.query(
         `UPDATE users
@@ -173,7 +180,7 @@ export async function upsertCheckinEmployee(
              partner_user_id = ?, partner_status = ?, is_active = ?, is_acc_admin = ?
          WHERE id = ?`,
         [
-          employee.email,
+          email,
           employee.name,
           username,
           employee.jobTitle,
@@ -198,7 +205,7 @@ export async function upsertCheckinEmployee(
        VALUES (?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?, ?)`,
       [
         employee.name,
-        employee.email,
+        email,
         temporaryUsername(),
         passwordHash,
         temporaryEmployeeCode(),
@@ -210,12 +217,13 @@ export async function upsertCheckinEmployee(
         employee.isAccAdmin ? 1 : 0,
       ],
     );
-    const username = employee.username?.trim() || usernameFor(employee.email, result.insertId);
+    const code = employeeCode(result.insertId);
+    const username = checkinUsername || code;
     await releaseUsername(connection, username, result.insertId);
     await connection.query(
       'UPDATE users SET employee_code = ?, username = ? WHERE id = ?',
       [
-        employeeCode(result.insertId),
+        code,
         username,
         result.insertId,
       ],

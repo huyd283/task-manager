@@ -46,15 +46,17 @@ export default function Login() {
             <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
           )}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Tên đăng nhập</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Email hoặc mã nhân viên</label>
             <input
               type="text"
               className={field}
               autoComplete="username"
+              placeholder="Email (Admin) hoặc mã nhân viên"
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
+            <p className="mt-1 text-[11px] text-slate-500">Tài khoản thành viên cần đăng nhập bằng mã nhân viên.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Mật khẩu</label>

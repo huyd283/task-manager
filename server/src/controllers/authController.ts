@@ -1,7 +1,13 @@
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
-import { findUserByEmail, findUserById, findUserByUsername, updateCheckinIdentity } from '../repositories/userRepository';
+import {
+  findUserByEmail,
+  findUserByEmployeeCode,
+  findUserById,
+  findUserByUsername,
+  updateCheckinIdentity,
+} from '../repositories/userRepository';
 import * as registrationRepo from '../repositories/registrationRepository';
 import { sendRegistrationOtp } from '../services/emailService';
 import { verifyCheckinCredentials } from '../services/checkinService';
@@ -123,9 +129,17 @@ export async function login(req: Request, res: Response) {
     throw new HttpError(400, 'username and password are required');
   }
 
-  const user = await findUserByUsername(username) ?? await findUserByEmail(normalizeEmail(username));
+  const emailIdentifier = normalizeEmail(username);
+  const isEmailIdentifier = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailIdentifier);
+  const user = isEmailIdentifier
+    ? await findUserByEmail(emailIdentifier) ?? await findUserByUsername(username)
+    : await findUserByUsername(username) ?? await findUserByEmployeeCode(username);
   if (!user) {
     throw new HttpError(401, 'Tài khoản hoặc mật khẩu không chính xác');
+  }
+  const isAdminAccount = user.role === 'admin' || Boolean(user.is_acc_admin);
+  if (isEmailIdentifier && !isAdminAccount) {
+    throw new HttpError(401, 'Tài khoản thành viên bắt buộc phải đăng nhập bằng Mã nhân viên');
   }
   if (!user.is_active) {
     throw new HttpError(403, 'Tài khoản không hoạt động');
