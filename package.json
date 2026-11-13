@@ -17,6 +17,7 @@
     "db:migrate:task-workflow": "npm --prefix server run db:migrate:task-workflow",
     "db:migrate:task-features": "npm --prefix server run db:migrate:task-features",
     "db:migrate:notifications": "npm --prefix server run db:migrate:notifications",
+    "db:migrate:daily-checkin": "npm --prefix server run db:migrate:daily-checkin",
     "install:all": "npm install && npm --prefix server install && npm --prefix client install"
   },
   "devDependencies": {

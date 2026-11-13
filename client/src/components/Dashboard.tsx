@@ -6,6 +6,7 @@ import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task }
 import { useAuth } from '../context/AuthContext';
 import SearchableSelect from './common/SearchableSelect';
 import TaskModal from './TaskModal';
+import DailyCheckin from './DailyCheckin';
 import {
   CheckCircle2,
   Clock,
@@ -40,6 +41,7 @@ export default function Dashboard() {
   const [filterMode, setFilterMode] = useState<'personal' | 'project' | 'all'>('personal');
   const [projectFilter, setProjectFilter] = useState('');
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  const [checkinRefresh, setCheckinRefresh] = useState(0);
 
   const taskListUrl = (filters: { status?: string; alert?: string } = {}) => {
     const params = new URLSearchParams();
@@ -208,6 +210,8 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      <DailyCheckin key={checkinRefresh} onCreateTask={() => setCreateTaskOpen(true)} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <button
@@ -475,6 +479,7 @@ export default function Dashboard() {
           onSaved={() => {
             setCreateTaskOpen(false);
             void loadTasks();
+            setCheckinRefresh((value) => value + 1);
           }}
         />
       )}

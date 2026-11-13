@@ -143,9 +143,13 @@ async function validateStatusTransition(
 }
 
 export async function list(req: Request, res: Response) {
-  const { status, assigneeId, priority, projectId, scope, dueFrom, dueTo } = req.query;
+  const { status, assigneeId, priority, projectId, scope, dueFrom, dueTo, plan } = req.query;
   const filter: taskRepo.TaskFilter = {};
 
+  if (plan !== undefined) {
+    if (plan !== 'today') throw new HttpError(400, "plan must be 'today'");
+    filter.plannedTodayUserId = req.user!.id;
+  }
   if (status) filter.status = assertStatus(status);
   if (typeof assigneeId === 'string') {
     const parsedAssigneeId = Number(assigneeId);

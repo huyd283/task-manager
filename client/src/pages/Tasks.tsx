@@ -30,6 +30,7 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -44,6 +45,7 @@ type TaskSortField = 'taskCode' | 'title' | 'startDate' | 'dueDate';
 export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
+  const planToday = searchParams.get('plan') === 'today';
   const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -86,6 +88,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
           ...(priorityFilter ? { priority: priorityFilter } : {}),
           ...(dueFrom ? { dueFrom } : {}),
           ...(dueTo ? { dueTo } : {}),
+          ...(planToday ? { plan: 'today' } : {}),
         },
       });
       setTasks(res.data.data);
@@ -98,7 +101,7 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
     } finally {
       setLoading(false);
     }
-  }, [assigneeFilter, dueFrom, dueTo, priorityFilter, projectFilter]);
+  }, [assigneeFilter, dueFrom, dueTo, planToday, priorityFilter, projectFilter]);
 
   useEffect(() => {
     Promise.all([
@@ -332,6 +335,11 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
           <p className="text-xs text-slate-500 mt-1">
             {urgentOnly ? 'Các task sắp hết hạn trong 24 giờ hoặc đã quá hạn' : 'Quản lý và theo dõi tiến độ công việc dự án'}
           </p>
+          {planToday && (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+              <CheckCircle2 size={13} /> Kế hoạch công việc hôm nay
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

@@ -17,6 +17,7 @@
     "db:migrate:task-features": "tsx src/scripts/migrateTaskFeatures.ts",
     "db:migrate:checkin": "tsx src/scripts/migrateCheckin.ts",
     "db:migrate:notifications": "tsx src/scripts/migrateNotifications.ts",
+    "db:migrate:daily-checkin": "tsx src/scripts/migrateDailyCheckin.ts",
     "checkin:sync": "node dist/scripts/syncCheckinEmployees.js"
   },
   "dependencies": {

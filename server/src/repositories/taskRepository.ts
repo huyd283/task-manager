@@ -100,6 +100,7 @@ export interface TaskFilter {
   userId?: number;
   dueFrom?: string;
   dueTo?: string;
+  plannedTodayUserId?: number;
 }
 
 export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
@@ -133,6 +134,13 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
   if (filter.dueTo) {
     clauses.push('tasks.due_date <= ?');
     params.push(filter.dueTo);
+  }
+  if (filter.plannedTodayUserId) {
+    clauses.push(`EXISTS (
+      SELECT 1 FROM daily_checkin_tasks dct
+      WHERE dct.task_id = tasks.id AND dct.user_id = ? AND dct.checkin_date = CURDATE()
+    )`);
+    params.push(filter.plannedTodayUserId);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';

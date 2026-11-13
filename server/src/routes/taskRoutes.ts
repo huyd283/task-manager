@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import * as taskController from '../controllers/taskController';
 import * as taskFeaturesController from '../controllers/taskFeaturesController';
 import * as taskPeriodReportController from '../controllers/taskPeriodReportController';
+import * as dailyCheckinController from '../controllers/dailyCheckinController';
 
 const router = Router();
 
@@ -12,6 +13,9 @@ router.get('/stats/by-assignee', asyncHandler(taskController.stats));
 router.get('/export', asyncHandler(taskFeaturesController.exportTasks));
 router.get('/report/time', asyncHandler(taskPeriodReportController.getTimeReport));
 router.get('/report/time/export', asyncHandler(taskPeriodReportController.exportTimeReport));
+router.get('/daily-checkin/today', asyncHandler(dailyCheckinController.getToday));
+router.post('/daily-checkin', asyncHandler(dailyCheckinController.save));
+router.get('/daily-checkin/blockers', asyncHandler(dailyCheckinController.blockers));
 
 router.get('/', asyncHandler(taskController.list));
 router.post('/', asyncHandler(taskController.create));

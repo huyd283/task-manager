@@ -5,6 +5,7 @@ import { migrateTaskWorkflow } from './utils/taskWorkflowMigration';
 import { migrateTaskFeatures } from './utils/taskFeaturesMigration';
 import { migrateCheckinIntegration } from './utils/checkinMigration';
 import { migrateNotificationModule } from './utils/notificationMigration';
+import { migrateDailyCheckin } from './utils/dailyCheckinMigration';
 import { startNotificationCronJobs } from './jobs/notificationCron';
 
 async function main() {
@@ -17,6 +18,8 @@ async function main() {
     console.log('✓ Checkin integration database is up to date');
     await migrateNotificationModule();
     console.log('✓ Notification database is up to date');
+    await migrateDailyCheckin();
+    console.log('✓ Daily check-in database is up to date');
     await assertDbConnection();
     console.log('✓ Connected to MySQL');
   } catch (err) {

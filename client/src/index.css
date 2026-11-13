@@ -21,3 +21,7 @@ body {
   border-radius: 9999px;
   background-color: #cbd5e1;
 }
+
+input[type='search'].daily-checkin-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
