@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import TaskModal from '../components/TaskModal';
 import {
@@ -42,20 +43,30 @@ type TaskSortField = 'taskCode' | 'title' | 'startDate' | 'dueDate';
 
 export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>('');
-  const [alertFilter, setAlertFilter] = useState<AlertFilter | null>(null);
+  const initialStatus = searchParams.get('status');
+  const initialAlert = searchParams.get('alert');
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | ''>(
+    TASK_STATUSES.includes(initialStatus as TaskStatus) ? initialStatus as TaskStatus : '',
+  );
+  const [alertFilter, setAlertFilter] = useState<AlertFilter | null>(
+    initialAlert === 'overdue' || initialAlert === 'soon' || initialAlert === 'not-started'
+      ? initialAlert
+      : null,
+  );
   const [searchText, setSearchText] = useState('');
   const [sortField, setSortField] = useState<TaskSortField>('taskCode');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
-  const [assigneeFilter, setAssigneeFilter] = useState('');
-  const [projectFilter, setProjectFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState(searchParams.get('assigneeId') ?? '');
+  const [projectFilter, setProjectFilter] = useState(searchParams.get('projectId') ?? '');
+  const previousProjectFilter = useRef(projectFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | ''>('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
@@ -100,7 +111,10 @@ export default function Tasks({ urgentOnly = false }: { urgentOnly?: boolean }) 
   }, []);
 
   useEffect(() => {
-    setAssigneeFilter('');
+    if (previousProjectFilter.current !== projectFilter) {
+      previousProjectFilter.current = projectFilter;
+      setAssigneeFilter('');
+    }
     if (!projectFilter) {
       setAssignees([]);
       return;

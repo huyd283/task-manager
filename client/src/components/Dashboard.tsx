@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import toast from 'react-hot-toast';
 import { TASK_STATUSES, STATUS_META, getDeadlineState, type Project, type Task } from '../types';
 import { useAuth } from '../context/AuthContext';
 import SearchableSelect from './common/SearchableSelect';
+import TaskModal from './TaskModal';
 import {
   CheckCircle2,
   Clock,
   AlertTriangle,
   ListTodo,
   TrendingUp,
-  FolderKanban,
   UserCheck,
   Calendar,
   Sparkles,
   ArrowUpRight,
+  Plus,
 } from 'lucide-react';
 import {
   BarChart,
@@ -31,11 +33,23 @@ import {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterMode, setFilterMode] = useState<'personal' | 'project' | 'all'>('personal');
   const [projectFilter, setProjectFilter] = useState('');
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
+
+  const taskListUrl = (filters: { status?: string; alert?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filterMode === 'personal' && user) params.set('assigneeId', String(user.id));
+    if (filterMode === 'project' && projectFilter) params.set('projectId', projectFilter);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.alert) params.set('alert', filters.alert);
+    const query = params.toString();
+    return query ? `/tasks?${query}` : '/tasks';
+  };
 
   const loadTasks = useCallback(async () => {
     if (filterMode === 'project' && !projectFilter) {
@@ -101,24 +115,30 @@ export default function Dashboard() {
     const count = tasks.filter((t) => t.status === status).length;
     return {
       name: STATUS_META[status]?.label ?? status,
+      status,
       value: count,
       color: STATUS_COLORS[status] || '#cbd5e1',
     };
   }).filter((item) => item.value > 0);
 
   // 3. Dữ liệu cho Biểu đồ Cột (BarChart Dự án)
-  const projectMap: Record<string, { total: number; done: number }> = {};
+  const projectMap = new Map<number, { name: string; total: number; done: number }>();
   tasks.forEach((t) => {
-    const proj = t.project?.trim() || 'Khác';
-    if (!projectMap[proj]) projectMap[proj] = { total: 0, done: 0 };
-    projectMap[proj].total += 1;
-    if (t.status === 'GOLIVE') projectMap[proj].done += 1;
+    const project = projectMap.get(t.projectId) ?? {
+      name: t.project?.trim() || 'Khác',
+      total: 0,
+      done: 0,
+    };
+    project.total += 1;
+    if (t.status === 'GOLIVE') project.done += 1;
+    projectMap.set(t.projectId, project);
   });
 
-  const barData = Object.keys(projectMap).map((proj) => ({
-    name: proj,
-    'Tổng task': projectMap[proj].total,
-    'Hoàn thành': projectMap[proj].done,
+  const barData = [...projectMap].map(([projectId, project]) => ({
+    projectId,
+    name: project.name,
+    'Tổng task': project.total,
+    'Hoàn thành': project.done,
   }));
 
   // 4. Danh sách Task quá hạn
@@ -128,22 +148,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header Dashboard */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
+      <div className="relative flex flex-col gap-4 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-600 via-indigo-600 to-violet-600" />
         <div className="pl-2">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-              Dashboard Thống Kê
+              Dashboard
             </h1>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-600 border border-blue-100">
               <Sparkles size={12} />
-              Real-time
+              LIVE
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Tổng quan tiến độ dự án, chỉ số hiệu suất và cảnh báo tiến độ
-          </p>
+          <p className="mt-1 text-xs text-slate-500">Tổng quan công việc · {filterMode === 'personal' ? 'Cá nhân' : filterMode === 'project' ? 'Dự án' : 'Toàn hệ thống'}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -182,75 +199,89 @@ export default function Dashboard() {
             <Calendar size={15} className="text-blue-600" />
             <span>Hôm nay: {new Date().toLocaleDateString('vi-VN')}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => setCreateTaskOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-md"
+          >
+            <Plus size={15} /> Tạo Task
+          </button>
         </div>
       </div>
 
-      {/* 4 Thẻ KPI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Tổng số Task */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all group">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <button
+          type="button"
+          onClick={() => navigate(taskListUrl())}
+          className="group rounded-2xl border border-slate-200/80 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Tổng công việc</p>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold group-hover:scale-110 transition-transform">
-              <ListTodo size={20} />
-            </div>
+            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Tổng Task</p>
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600 transition group-hover:scale-110"><ListTodo size={20} /></span>
           </div>
-          <h3 className="text-2xl font-extrabold text-slate-900 mt-2">{totalTasks}</h3>
-          <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
-            <FolderKanban size={13} className="text-slate-400" />
-            <span>{filterMode === 'personal' ? 'Task được giao cho bạn' : filterMode === 'project' ? 'Trong dự án đã chọn' : 'Trên toàn bộ dự án khả dụng'}</span>
-          </p>
-        </div>
+          <p className="mt-4 text-5xl font-extrabold tracking-tight text-slate-950">{loading ? '—' : totalTasks}</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-blue-700">Mở danh sách <ArrowUpRight size={14} /></span>
+        </button>
 
-        {/* Đã Hoàn Thành */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all group">
+        <button
+          type="button"
+          onClick={() => navigate(taskListUrl({ status: 'GOLIVE' }))}
+          className="group rounded-2xl border border-emerald-200/80 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        >
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Đã hoàn thành</p>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold group-hover:scale-110 transition-transform">
-              <CheckCircle2 size={20} />
-            </div>
+            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Hoàn thành</p>
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-600 transition group-hover:scale-110"><CheckCircle2 size={20} /></span>
           </div>
-          <h3 className="text-2xl font-extrabold text-emerald-600 mt-2">{completedTasks}</h3>
-          <p className="text-[11px] text-emerald-600 font-bold mt-1 flex items-center gap-1">
-            <TrendingUp size={13} />
-            <span>Đạt {completionRate}% Golive</span>
-          </p>
-        </div>
+          <p className="mt-4 text-5xl font-extrabold tracking-tight text-emerald-600">{loading ? '—' : completedTasks}</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><TrendingUp size={14} /> {completionRate}% · Xem Task</span>
+        </button>
 
-        {/* Đang Xử Lý */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all group">
+        <button
+          type="button"
+          onClick={() => navigate(taskListUrl({ status: 'IN_PROGRESS' }))}
+          className="group rounded-2xl border border-blue-200/80 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Đang xử lý</p>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold group-hover:scale-110 transition-transform">
-              <Clock size={20} />
-            </div>
+            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Đang xử lý</p>
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600 transition group-hover:scale-110"><Clock size={20} /></span>
           </div>
-          <h3 className="text-2xl font-extrabold text-blue-600 mt-2">{inProgressTasks}</h3>
-          <p className="text-[11px] text-slate-500 font-medium mt-1">Đang trong tiến trình thực hiện</p>
-        </div>
+          <p className="mt-4 text-5xl font-extrabold tracking-tight text-blue-700">{loading ? '—' : inProgressTasks}</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-blue-700">Mở danh sách <ArrowUpRight size={14} /></span>
+        </button>
 
-        {/* Cảnh Báo Quá Hạn */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all group">
+        <button
+          type="button"
+          onClick={() => navigate(taskListUrl({ alert: 'overdue' }))}
+          className="group rounded-2xl border border-rose-200/80 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-rose-500"
+        >
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Quá hạn chót</p>
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold group-hover:scale-110 transition-transform">
-              <AlertTriangle size={20} />
-            </div>
+            <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Quá hạn</p>
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-rose-50 text-rose-600 transition group-hover:scale-110"><AlertTriangle size={20} /></span>
           </div>
-          <h3 className="text-2xl font-extrabold text-rose-600 mt-2">{overdueTasks}</h3>
-          <p className="text-[11px] text-rose-500 font-bold mt-1">Cần ưu tiên giải quyết gấp</p>
-        </div>
+          <p className="mt-4 text-5xl font-extrabold tracking-tight text-rose-600">{loading ? '—' : overdueTasks}</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-rose-700">Xử lý ngay <ArrowUpRight size={14} /></span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Tổng giờ dự tính</p>
-          <p className="mt-2 text-2xl font-extrabold text-blue-700">{totalEstimatedHours}h</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Tổng giờ đã ghi nhận</p>
-          <p className="mt-2 text-2xl font-extrabold text-indigo-700">{totalLoggedHours}h</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate(taskListUrl())}
+          className="group rounded-2xl border border-slate-200/80 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Giờ dự tính</p>
+          <p className="mt-2 text-3xl font-extrabold tracking-tight text-blue-700">{loading ? '—' : `${totalEstimatedHours}h`}</p>
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700">Xem Task <ArrowUpRight size={14} /></span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/reports')}
+          className="group rounded-2xl border border-slate-200/80 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Giờ đã ghi nhận</p>
+          <p className="mt-2 text-3xl font-extrabold tracking-tight text-indigo-700">{loading ? '—' : `${totalLoggedHours}h`}</p>
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-indigo-700">Mở báo cáo <ArrowUpRight size={14} /></span>
+        </button>
       </div>
 
       {/* Khu vực Biểu Đồ Chart */}
@@ -281,9 +312,11 @@ export default function Dashboard() {
                     outerRadius={85}
                     paddingAngle={4}
                     dataKey="value"
+                    onClick={(entry) => navigate(taskListUrl({ status: entry.status }))}
+                    className="cursor-pointer"
                   >
                     {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                      <Cell key={`cell-${index}`} fill={entry.color} className="cursor-pointer" />
                     ))}
                   </Pie>
                   <Tooltip
@@ -366,8 +399,22 @@ export default function Dashboard() {
                       fontSize: '12px',
                     }}
                   />
-                  <Bar dataKey="Tổng task" fill="#93c5fd" radius={[6, 6, 0, 0]} barSize={18} />
-                  <Bar dataKey="Hoàn thành" fill="#10b981" radius={[6, 6, 0, 0]} barSize={18} />
+                  <Bar
+                    dataKey="Tổng task"
+                    fill="#93c5fd"
+                    radius={[6, 6, 0, 0]}
+                    barSize={18}
+                    className="cursor-pointer"
+                    onClick={(entry) => navigate(`/tasks?projectId=${entry.projectId}`)}
+                  />
+                  <Bar
+                    dataKey="Hoàn thành"
+                    fill="#10b981"
+                    radius={[6, 6, 0, 0]}
+                    barSize={18}
+                    className="cursor-pointer"
+                    onClick={(entry) => navigate(`/tasks?projectId=${entry.projectId}&status=GOLIVE`)}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -421,6 +468,16 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+      {createTaskOpen && (
+        <TaskModal
+          task={null}
+          onClose={() => setCreateTaskOpen(false)}
+          onSaved={() => {
+            setCreateTaskOpen(false);
+            void loadTasks();
+          }}
+        />
+      )}
     </div>
   );
 }

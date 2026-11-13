@@ -6,6 +6,7 @@ import * as projectRepo from '../repositories/projectRepository';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskPriority, type TaskStatus } from '../types';
 import { pool } from '../config/db';
 import type { RowDataPacket } from 'mysql2';
+import { notifyTaskCreated, notifyTaskUpdated } from '../services/taskNotificationService';
 
 function parseId(raw: string): number {
   const id = Number(raw);
@@ -221,6 +222,7 @@ export async function create(req: Request, res: Response) {
     { ...body, projectId, assigneeIds, assigneeId: assigneeIds[0] ?? null, taskCode } as Parameters<typeof taskRepo.createTask>[0],
     req.user!.id,
   );
+  await notifyTaskCreated(task, req.user!.id, isTaskAdmin(req));
   res.status(201).json({ data: task });
 }
 
@@ -334,6 +336,7 @@ export async function update(req: Request, res: Response) {
   }
 
   const task = await taskRepo.updateTask(id, body, req.user!.id, isAdmin);
+  if (task) await notifyTaskUpdated(existing, task, req.user!.id, isAdmin);
   res.json({ data: task });
 }
 
@@ -366,6 +369,7 @@ export async function updateStatus(req: Request, res: Response) {
   };
   await validateStatusTransition(existing, status, id, undefined, undefined, isAdmin, proposedDates);
   const task = await taskRepo.updateTask(id, { status, ...dateUpdates }, req.user!.id, isAdmin);
+  if (task) await notifyTaskUpdated(existing, task, req.user!.id, isAdmin);
   res.json({ data: task });
 }
 

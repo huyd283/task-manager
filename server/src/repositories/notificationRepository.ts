@@ -72,6 +72,23 @@ export async function findNotificationRecipients(partnerUserIds: number[]): Prom
   return rows;
 }
 
+export async function findEligiblePartnerUserIdsForUsers(userIds: number[]): Promise<number[]> {
+  if (userIds.length === 0) return [];
+  const placeholders = userIds.map(() => '?').join(', ');
+  const [rows] = await pool.query<Array<RowDataPacket & { partner_user_id: number }>>(
+    `SELECT partner_user_id
+     FROM users
+     WHERE id IN (${placeholders})
+       AND partner_user_id IS NOT NULL
+       AND is_active = 1
+       AND partner_status = 'ACTIVE'
+       AND is_acc_admin = 0
+       AND role <> 'admin'`,
+    userIds,
+  );
+  return [...new Set(rows.map((row) => Number(row.partner_user_id)))];
+}
+
 export async function listNotificationRecipients(): Promise<MirroredEmployee[]> {
   const [rows] = await pool.query<MirroredEmployee[]>(
     `SELECT id, partner_user_id, name, email, job_title, department,

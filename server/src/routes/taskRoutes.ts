@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import * as taskController from '../controllers/taskController';
 import * as taskFeaturesController from '../controllers/taskFeaturesController';
+import * as taskPeriodReportController from '../controllers/taskPeriodReportController';
 
 const router = Router();
 
@@ -9,6 +10,8 @@ const router = Router();
 // so it isn't captured by the id parameter.
 router.get('/stats/by-assignee', asyncHandler(taskController.stats));
 router.get('/export', asyncHandler(taskFeaturesController.exportTasks));
+router.get('/report/time', asyncHandler(taskPeriodReportController.getTimeReport));
+router.get('/report/time/export', asyncHandler(taskPeriodReportController.exportTimeReport));
 
 router.get('/', asyncHandler(taskController.list));
 router.post('/', asyncHandler(taskController.create));
