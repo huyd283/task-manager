@@ -41,7 +41,7 @@ export function createApp() {
   app.use(["/api/projects", "/projects"], authenticate, projectRoutes);
   // All task endpoints require a valid JWT.
   app.use(["/api/v1/tasks", "/api/tasks", "/tasks"], authenticate, taskRoutes);
-  app.use("/api/v1/admin/daily-checkin", authenticate, adminDailyCheckinRoutes);
+  app.use(["/api/v1/admin/daily-checkin", "/api/admin/daily-checkin", "/admin/daily-checkin"], authenticate, adminDailyCheckinRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
