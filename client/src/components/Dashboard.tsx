@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import SearchableSelect from './common/SearchableSelect';
 import TaskModal from './TaskModal';
 import DailyCheckin from './DailyCheckin';
+import AdminDailyCheckin from './AdminDailyCheckin';
 import {
   CheckCircle2,
   Clock,
@@ -38,7 +39,9 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterMode, setFilterMode] = useState<'personal' | 'project' | 'all'>('personal');
+  const [filterMode, setFilterMode] = useState<'personal' | 'project' | 'all'>(
+    () => user?.role === 'admin' ? 'all' : 'personal',
+  );
   const [projectFilter, setProjectFilter] = useState('');
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [checkinRefresh, setCheckinRefresh] = useState(0);
@@ -147,9 +150,11 @@ export default function Dashboard() {
   const overdueList = tasks
     .filter((t) => getDeadlineState(t.dueDate, t.status) === 'overdue')
     .slice(0, 5);
+  const canManageCheckins = user?.role === 'admin' || user?.isAccAdmin === true || user?.jobTitle === 'Project Lead';
 
   return (
     <div className="space-y-6">
+      {canManageCheckins && <AdminDailyCheckin />}
       <div className="relative flex flex-col gap-4 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-600 via-indigo-600 to-violet-600" />
         <div className="pl-2">
@@ -211,7 +216,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <DailyCheckin key={checkinRefresh} onCreateTask={() => setCreateTaskOpen(true)} />
+      {user?.role !== 'admin' && (
+        <DailyCheckin key={checkinRefresh} onCreateTask={() => setCreateTaskOpen(true)} />
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <button

@@ -411,14 +411,16 @@ export async function updateTaskStatus(id: number, status: TaskStatus, userId: n
   return updateTask(id, { status }, userId);
 }
 
-export async function getTaskHistory(taskId: number): Promise<TaskHistoryEntry[]> {
+export async function getTaskHistory(taskId: number, date?: string): Promise<TaskHistoryEntry[]> {
+  const dateFilter = date ? 'AND h.`timestamp` >= ? AND h.`timestamp` < DATE_ADD(?, INTERVAL 1 DAY)' : '';
+  const params = date ? [taskId, date, date] : [taskId];
   const [rows] = await pool.query<Array<RowDataPacket & TaskHistoryEntry>>(
     `SELECT h.id, h.task_id AS taskId, h.user_id AS userId, u.name AS userName,
             h.action_type AS actionType, h.old_value AS oldValue, h.new_value AS newValue,
             h.\`timestamp\` AS timestamp
      FROM task_history h LEFT JOIN users u ON u.id = h.user_id
-     WHERE h.task_id = ? ORDER BY h.\`timestamp\` DESC, h.id DESC`,
-    [taskId],
+     WHERE h.task_id = ? ${dateFilter} ORDER BY h.\`timestamp\` DESC, h.id DESC`,
+    params,
   );
   return rows;
 }

@@ -22,6 +22,17 @@ function canManageTasks(req: Request) {
   return req.user?.role === 'admin' || req.user?.isAccAdmin === true || req.user?.jobTitle === 'Project Lead';
 }
 
+interface SubtaskHistorySnapshot {
+  title: string;
+  status: string;
+  assigneeId: number | null;
+  estimatedHours: number | null;
+}
+
+function subtaskHistoryValue(subtask: SubtaskHistorySnapshot): string {
+  return `“${subtask.title}” · ${subtask.status} · ${subtask.assigneeId === null ? 'Chưa gán' : `Nhân sự #${subtask.assigneeId}`} · ${subtask.estimatedHours === null ? 'Chưa ước tính giờ' : `${subtask.estimatedHours} giờ`}`;
+}
+
 async function taskForUser(req: Request, rawId = req.params.id) {
   const task = await taskRepo.getTaskById(idParam(rawId));
   if (!task) throw new HttpError(404, 'Task not found');
@@ -138,6 +149,15 @@ export async function createSubtask(req: Request, res: Response) {
       [task.id, title, assigneeId, estimatedHours],
     );
     subtaskId = result.insertId;
+    await connection.query(
+      'INSERT INTO task_history (task_id, user_id, action_type, new_value) VALUES (?, ?, ?, ?)',
+      [task.id, req.user!.id, 'subtask', subtaskHistoryValue({
+        title,
+        status: 'TODO',
+        assigneeId,
+        estimatedHours,
+      })],
+    );
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -152,6 +172,25 @@ export async function updateSubtask(req: Request, res: Response) {
   const task = await taskForUser(req);
   const subtaskId = idParam(req.params.subtaskId);
   const body = (req.body ?? {}) as Record<string, unknown>;
+  const [subtaskRows] = await pool.query<Array<RowDataPacket & {
+    title: string;
+    status: string;
+    assigneeId: number | null;
+    estimatedHours: number | string | null;
+  }>>(
+    `SELECT title, status, assignee_user_id AS assigneeId, estimated_hours AS estimatedHours
+     FROM task_subtasks WHERE id = ? AND task_id = ?`,
+    [subtaskId, task.id],
+  );
+  const existing = subtaskRows[0];
+  if (!existing) throw new HttpError(404, 'Subtask not found');
+  const previous: SubtaskHistorySnapshot = {
+    title: existing.title,
+    status: existing.status,
+    assigneeId: existing.assigneeId === null ? null : Number(existing.assigneeId),
+    estimatedHours: existing.estimatedHours === null ? null : Number(existing.estimatedHours),
+  };
+  const next = { ...previous };
   if (['REVIEW', 'DONE', 'GOLIVE'].includes(task.status) && body.status !== undefined && body.status !== 'DONE') {
     throw new HttpError(409, 'Subtasks cannot be reopened after the task has entered review or completion');
   }
@@ -160,12 +199,14 @@ export async function updateSubtask(req: Request, res: Response) {
   if (body.title !== undefined) {
     if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 255) throw new HttpError(400, 'Invalid subtask title');
     fields.push('title = ?');
-    values.push(body.title.trim());
+    next.title = body.title.trim();
+    values.push(next.title);
   }
   if (body.status !== undefined) {
     if (!['TODO', 'IN_PROGRESS', 'DONE'].includes(String(body.status))) throw new HttpError(400, 'Invalid subtask status');
     fields.push('status = ?');
-    values.push(body.status);
+    next.status = String(body.status);
+    values.push(next.status);
   }
   if (body.assigneeId !== undefined) {
     const assigneeId = body.assigneeId == null || body.assigneeId === '' ? null : Number(body.assigneeId);
@@ -174,12 +215,14 @@ export async function updateSubtask(req: Request, res: Response) {
       !(await projectRepo.isProjectMember(task.projectId, assigneeId)))) {
       throw new HttpError(400, 'Subtask assignee must be an active member of the task project');
     }
+    next.assigneeId = assigneeId;
     fields.push('assignee_user_id = ?');
     values.push(assigneeId);
   }
   if (body.estimatedHours !== undefined) {
     const hours = body.estimatedHours == null || body.estimatedHours === '' ? null : Number(body.estimatedHours);
     if (hours !== null && (!Number.isFinite(hours) || hours < 0)) throw new HttpError(400, 'Invalid estimatedHours');
+    next.estimatedHours = hours;
     fields.push('estimated_hours = ?');
     values.push(hours);
   }
@@ -190,16 +233,44 @@ export async function updateSubtask(req: Request, res: Response) {
     values,
   );
   if (!result.affectedRows) throw new HttpError(404, 'Subtask not found');
+  if (JSON.stringify(previous) !== JSON.stringify(next)) {
+    await pool.query(
+      'INSERT INTO task_history (task_id, user_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?)',
+      [task.id, req.user!.id, 'subtask', subtaskHistoryValue(previous), subtaskHistoryValue(next)],
+    );
+  }
   res.json({ data: { id: subtaskId, ...body } });
 }
 
 export async function deleteSubtask(req: Request, res: Response) {
   const task = await taskForUser(req);
+  const subtaskId = idParam(req.params.subtaskId);
+  const [subtaskRows] = await pool.query<Array<RowDataPacket & {
+    title: string;
+    status: string;
+    assigneeId: number | null;
+    estimatedHours: number | string | null;
+  }>>(
+    `SELECT title, status, assignee_user_id AS assigneeId, estimated_hours AS estimatedHours
+     FROM task_subtasks WHERE id = ? AND task_id = ?`,
+    [subtaskId, task.id],
+  );
+  const subtask = subtaskRows[0];
+  if (!subtask) throw new HttpError(404, 'Subtask not found');
   const [result] = await pool.query<ResultSetHeader>(
     'DELETE FROM task_subtasks WHERE id = ? AND task_id = ?',
-    [idParam(req.params.subtaskId), task.id],
+    [subtaskId, task.id],
   );
   if (!result.affectedRows) throw new HttpError(404, 'Subtask not found');
+  await pool.query(
+    'INSERT INTO task_history (task_id, user_id, action_type, old_value) VALUES (?, ?, ?, ?)',
+    [task.id, req.user!.id, 'subtask', subtaskHistoryValue({
+      title: subtask.title,
+      status: subtask.status,
+      assigneeId: subtask.assigneeId === null ? null : Number(subtask.assigneeId),
+      estimatedHours: subtask.estimatedHours === null ? null : Number(subtask.estimatedHours),
+    })],
+  );
   res.status(204).send();
 }
 

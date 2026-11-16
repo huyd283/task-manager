@@ -33,6 +33,9 @@ interface CheckinRow extends RowDataPacket {
   blockerDescription: string | null;
   blockerTaskId: number | null;
   blockerImpact: BlockerImpact | null;
+  blockerFeedback: string | null;
+  blockerFeedbackBy: string | null;
+  blockerFeedbackAt: string | null;
   isComplete: number;
   completedAt: string | null;
   savedAt: string;
@@ -52,6 +55,15 @@ const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
 
 function uniqueIds(ids: number[]): number[] {
   return [...new Set(ids)];
+}
+
+function blockerHistoryValue(
+  status: BlockerStatus | null,
+  description: string | null,
+  impact: BlockerImpact | null,
+): string {
+  if (status !== 'BLOCKED') return 'Không có vướng mắc';
+  return `Vướng mắc (${impact ?? 'chưa rõ'}): ${description ?? ''}`;
 }
 
 async function assertAssignedTasks(
@@ -185,12 +197,22 @@ async function updateTaskStatus(
 
 export async function loadTodayCheckin(userId: number): Promise<Record<string, unknown> | null> {
   const [rows] = await pool.query<CheckinRow[]>(
-    `SELECT id, reviewed_task_ids AS reviewedTaskIds, review_confirmed AS reviewConfirmed,
-            plan_confirmed AS planConfirmed, blocker_status AS blockerStatus,
-            blocker_description AS blockerDescription, blocker_task_id AS blockerTaskId,
-            blocker_impact AS blockerImpact, is_complete AS isComplete,
-            completed_at AS completedAt, updated_at AS savedAt
-     FROM daily_checkins WHERE user_id = ? AND checkin_date = CURDATE() LIMIT 1`,
+    `SELECT daily_checkins.id, daily_checkins.reviewed_task_ids AS reviewedTaskIds,
+            daily_checkins.review_confirmed AS reviewConfirmed,
+            daily_checkins.plan_confirmed AS planConfirmed,
+            daily_checkins.blocker_status AS blockerStatus,
+            daily_checkins.blocker_description AS blockerDescription,
+            daily_checkins.blocker_task_id AS blockerTaskId,
+            daily_checkins.blocker_impact AS blockerImpact,
+            daily_checkins.blocker_feedback AS blockerFeedback,
+            feedback_user.name AS blockerFeedbackBy,
+            daily_checkins.blocker_feedback_at AS blockerFeedbackAt,
+            daily_checkins.is_complete AS isComplete,
+            daily_checkins.completed_at AS completedAt,
+            daily_checkins.updated_at AS savedAt
+     FROM daily_checkins
+     LEFT JOIN users feedback_user ON feedback_user.id = daily_checkins.blocker_feedback_by_user_id
+     WHERE daily_checkins.user_id = ? AND daily_checkins.checkin_date = CURDATE() LIMIT 1`,
     [userId],
   );
   const row = rows[0];
@@ -215,6 +237,9 @@ export async function loadTodayCheckin(userId: number): Promise<Record<string, u
     blockerDescription: row.blockerDescription,
     blockerTaskId: row.blockerTaskId === null ? null : Number(row.blockerTaskId),
     blockerImpact: row.blockerImpact,
+    blockerFeedback: row.blockerFeedback,
+    blockerFeedbackBy: row.blockerFeedbackBy,
+    blockerFeedbackAt: row.blockerFeedbackAt,
     isComplete: Boolean(row.isComplete),
     completedAt: row.completedAt,
     savedAt: row.savedAt,
@@ -252,6 +277,31 @@ export async function saveTodayCheckin(userId: number, input: DailyCheckinInput)
       throw new HttpError(400, 'Complete all three check-in steps before submitting');
     }
 
+    const [existingCheckins] = await connection.query<Array<RowDataPacket & {
+      blockerStatus: BlockerStatus | null;
+      blockerDescription: string | null;
+      blockerTaskId: number | null;
+      blockerImpact: BlockerImpact | null;
+    }>>(
+      `SELECT blocker_status AS blockerStatus, blocker_description AS blockerDescription,
+              blocker_task_id AS blockerTaskId, blocker_impact AS blockerImpact
+       FROM daily_checkins WHERE user_id = ? AND checkin_date = CURDATE() FOR UPDATE`,
+      [userId],
+    );
+    const previousBlocker = existingCheckins[0];
+    const nextBlockerStatus = input.blockerStatus;
+    const nextBlockerDescription = input.blockerStatus === 'BLOCKED' ? input.blockerDescription : null;
+    const nextBlockerTaskId = input.blockerStatus === 'BLOCKED' ? input.blockerTaskId : null;
+    const nextBlockerImpact = input.blockerStatus === 'BLOCKED' ? input.blockerImpact : null;
+    const previousBlockerTaskId = previousBlocker?.blockerTaskId === null || previousBlocker?.blockerTaskId === undefined
+      ? null
+      : Number(previousBlocker.blockerTaskId);
+    const blockerChanged =
+      (previousBlocker?.blockerStatus ?? null) !== nextBlockerStatus ||
+      (previousBlocker?.blockerDescription ?? null) !== nextBlockerDescription ||
+      previousBlockerTaskId !== nextBlockerTaskId ||
+      (previousBlocker?.blockerImpact ?? null) !== nextBlockerImpact;
+
     for (const update of input.statusUpdates) {
       await updateTaskStatus(connection, userId, update.taskId, update);
     }
@@ -265,6 +315,9 @@ export async function saveTodayCheckin(userId: number, input: DailyCheckinInput)
          reviewed_task_ids = VALUES(reviewed_task_ids),
          review_confirmed = VALUES(review_confirmed),
          plan_confirmed = VALUES(plan_confirmed),
+         blocker_feedback = IF(?, NULL, blocker_feedback),
+         blocker_feedback_by_user_id = IF(?, NULL, blocker_feedback_by_user_id),
+         blocker_feedback_at = IF(?, NULL, blocker_feedback_at),
          blocker_status = VALUES(blocker_status),
          blocker_description = VALUES(blocker_description),
          blocker_task_id = VALUES(blocker_task_id),
@@ -277,13 +330,42 @@ export async function saveTodayCheckin(userId: number, input: DailyCheckinInput)
         Number(input.reviewConfirmed),
         Number(input.planConfirmed),
         input.blockerStatus,
-        input.blockerStatus === 'BLOCKED' ? input.blockerDescription : null,
-        input.blockerStatus === 'BLOCKED' ? input.blockerTaskId : null,
-        input.blockerStatus === 'BLOCKED' ? input.blockerImpact : null,
+        nextBlockerDescription,
+        nextBlockerTaskId,
+        nextBlockerImpact,
         Number(input.complete),
         Number(input.complete),
+        Number(blockerChanged),
+        Number(blockerChanged),
+        Number(blockerChanged),
       ],
     );
+    if (blockerChanged) {
+      const affectedTaskIds = [...new Set([
+        previousBlockerTaskId,
+        nextBlockerTaskId,
+      ].filter((taskId): taskId is number => taskId !== null))];
+      for (const taskId of affectedTaskIds) {
+        await connection.query(
+          'INSERT INTO task_history (task_id, user_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?)',
+          [
+            taskId,
+            userId,
+            'blocker',
+            previousBlockerTaskId === taskId
+              ? blockerHistoryValue(
+                previousBlocker?.blockerStatus ?? null,
+                previousBlocker?.blockerDescription ?? null,
+                previousBlocker?.blockerImpact ?? null,
+              )
+              : null,
+            nextBlockerTaskId === taskId
+              ? blockerHistoryValue(nextBlockerStatus, nextBlockerDescription, nextBlockerImpact)
+              : null,
+          ],
+        );
+      }
+    }
     await connection.query(
       'DELETE FROM daily_checkin_tasks WHERE user_id = ? AND checkin_date = CURDATE()',
       [userId],
@@ -309,26 +391,41 @@ export async function listVisibleBlockers(
   isAccAdmin: boolean,
   jobTitle: string,
   department: string | null,
+  userId: number,
 ): Promise<Array<Record<string, unknown>>> {
   const admin = role === 'admin' || isAccAdmin;
   const lead = jobTitle === 'Project Lead';
   if (!admin && !lead) throw new HttpError(403, 'Only administrators and department leads can view blockers');
-  if (!admin && !department?.trim()) {
-    throw new HttpError(403, 'A department must be assigned to your account to view blockers');
-  }
   const [rows] = await pool.query<Array<RowDataPacket & Record<string, unknown>>>(
     `SELECT c.id, c.checkin_date AS checkinDate, c.blocker_description AS description,
             c.blocker_impact AS impact, c.blocker_task_id AS taskId,
+            c.blocker_feedback AS feedback, c.blocker_feedback_at AS feedbackAt,
+            feedback_user.name AS feedbackBy,
             u.id AS userId, u.name AS userName, u.department,
             t.task_code AS taskCode, t.title AS taskTitle, p.name AS projectName
      FROM daily_checkins c
      JOIN users u ON u.id = c.user_id
+     LEFT JOIN users feedback_user ON feedback_user.id = c.blocker_feedback_by_user_id
      LEFT JOIN tasks t ON t.id = c.blocker_task_id
      LEFT JOIN projects p ON p.id = t.project_id
      WHERE c.checkin_date = CURDATE() AND c.blocker_status = 'BLOCKED'
-       AND c.is_complete = 1 AND (? = 1 OR u.department = ?)
+       AND c.is_complete = 1
+       AND (? = 1 OR u.department = ? OR EXISTS (
+         SELECT 1
+         FROM project_members lead_member
+         JOIN project_members employee_member ON employee_member.project_id = lead_member.project_id
+         WHERE lead_member.user_id = ? AND lead_member.role_in_project <> 'lead'
+           AND employee_member.user_id = u.id
+           AND (
+             c.blocker_task_id IS NULL OR EXISTS (
+               SELECT 1 FROM tasks scoped_task
+               WHERE scoped_task.id = c.blocker_task_id
+                 AND scoped_task.project_id = lead_member.project_id
+             )
+           )
+       ))
      ORDER BY FIELD(c.blocker_impact, 'HIGH', 'MEDIUM', 'LOW'), c.updated_at DESC`,
-    [Number(admin), department],
+    [Number(admin), department, userId],
   );
   return rows;
 }

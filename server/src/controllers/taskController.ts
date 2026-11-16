@@ -379,10 +379,11 @@ export async function updateStatus(req: Request, res: Response) {
 
 export async function history(req: Request, res: Response) {
   const id = parseId(req.params.id);
+  const date = req.query.date === undefined ? undefined : assertDateFilter(req.query.date, 'date');
   const task = await taskRepo.getTaskById(id);
   if (!task) throw new HttpError(404, 'Task not found');
   await assertTaskAccess(req, task);
-  const data = await taskRepo.getTaskHistory(id);
+  const data = await taskRepo.getTaskHistory(id, date);
   res.json({ data });
 }
 

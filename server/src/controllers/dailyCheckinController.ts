@@ -148,6 +148,7 @@ export async function blockers(req: Request, res: Response) {
     Boolean(user.is_acc_admin),
     user.job_title,
     user.department,
+    req.user!.id,
   );
   res.json({ data });
 }

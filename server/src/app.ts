@@ -5,6 +5,7 @@ import { authenticate, requireAdmin } from "./middleware/auth";
 import { errorHandler, notFound } from "./middleware/errorHandler";
 import authRoutes from "./routes/authRoutes";
 import taskRoutes from "./routes/taskRoutes";
+import adminDailyCheckinRoutes from "./routes/adminDailyCheckinRoutes";
 import projectRoutes from "./routes/projectRoutes";
 import userRoutes from "./routes/userRoutes";
 import internalNotificationRoutes from "./routes/internalNotificationRoutes";
@@ -39,7 +40,8 @@ export function createApp() {
   app.use(["/api/users", "/users"], authenticate, userRoutes);
   app.use(["/api/projects", "/projects"], authenticate, projectRoutes);
   // All task endpoints require a valid JWT.
-  app.use(["/api/tasks", "/tasks"], authenticate, taskRoutes);
+  app.use(["/api/v1/tasks", "/api/tasks", "/tasks"], authenticate, taskRoutes);
+  app.use("/api/v1/admin/daily-checkin", authenticate, adminDailyCheckinRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

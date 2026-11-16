@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import type { RowDataPacket } from 'mysql2';
 import { env } from '../config/env';
 
 export async function migrateDailyCheckin(): Promise<void> {
@@ -23,6 +24,9 @@ export async function migrateDailyCheckin(): Promise<void> {
         blocker_description TEXT NULL,
         blocker_task_id INT NULL,
         blocker_impact ENUM('LOW','MEDIUM','HIGH') NULL,
+        blocker_feedback TEXT NULL,
+        blocker_feedback_by_user_id INT NULL,
+        blocker_feedback_at DATETIME NULL,
         is_complete TINYINT(1) NOT NULL DEFAULT 0,
         completed_at DATETIME NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -36,6 +40,19 @@ export async function migrateDailyCheckin(): Promise<void> {
           REFERENCES tasks (id) ON DELETE SET NULL ON UPDATE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
     );
+    const [columns] = await connection.query<Array<RowDataPacket & { Field: string }>>(
+      'SHOW COLUMNS FROM daily_checkins',
+    );
+    const existingColumns = new Set(columns.map((column) => column.Field));
+    if (!existingColumns.has('blocker_feedback')) {
+      await connection.query('ALTER TABLE daily_checkins ADD COLUMN blocker_feedback TEXT NULL');
+    }
+    if (!existingColumns.has('blocker_feedback_by_user_id')) {
+      await connection.query('ALTER TABLE daily_checkins ADD COLUMN blocker_feedback_by_user_id INT NULL');
+    }
+    if (!existingColumns.has('blocker_feedback_at')) {
+      await connection.query('ALTER TABLE daily_checkins ADD COLUMN blocker_feedback_at DATETIME NULL');
+    }
     await connection.query(
       `CREATE TABLE IF NOT EXISTS daily_checkin_tasks (
         user_id INT NOT NULL,

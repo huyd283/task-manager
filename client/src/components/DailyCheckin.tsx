@@ -37,6 +37,9 @@ interface CheckinRecord {
   blockerDescription: string | null;
   blockerTaskId: number | null;
   blockerImpact: BlockerImpact | null;
+  blockerFeedback: string | null;
+  blockerFeedbackBy: string | null;
+  blockerFeedbackAt: string | null;
   isComplete: boolean;
   completedAt: string | null;
   savedAt: string | null;
@@ -60,6 +63,9 @@ interface BlockerReport {
   taskCode: string | null;
   taskTitle: string | null;
   projectName: string | null;
+  feedback: string | null;
+  feedbackBy: string | null;
+  feedbackAt: string | null;
 }
 
 interface DailyCheckinProps {
@@ -263,6 +269,17 @@ export default function DailyCheckin({ onCreateTask }: DailyCheckinProps) {
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-900">{blocker.userName}{blocker.department ? ` · ${blocker.department}` : ''}</p>
                     <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{blocker.description}</p>
+                    {blocker.feedback && (
+                      <div className="mt-3 rounded-xl border border-blue-100 bg-white/80 p-3">
+                        <p className="text-[11px] font-extrabold text-blue-800">
+                          Phản hồi quản lý{blocker.feedbackBy ? ` · ${blocker.feedbackBy}` : ''}
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{blocker.feedback}</p>
+                        {blocker.feedbackAt && (
+                          <time className="mt-1 block text-[10px] text-slate-400">{new Date(blocker.feedbackAt).toLocaleString('vi-VN')}</time>
+                        )}
+                      </div>
+                    )}
                     {(blocker.taskCode || blocker.projectName) && (
                       <p className="mt-1 text-xs text-slate-500">
                         {blocker.taskCode && `${blocker.taskCode}${blocker.taskTitle ? ` · ${blocker.taskTitle}` : ''}`}
@@ -317,6 +334,17 @@ export default function DailyCheckin({ onCreateTask }: DailyCheckinProps) {
               <p className={`text-xs font-extrabold uppercase tracking-wide ${data.checkin.blockerStatus === 'BLOCKED' ? 'text-rose-800' : 'text-emerald-800'}`}>Vướng mắc</p>
               <p className="mt-2 text-base font-bold text-slate-900">{data.checkin.blockerStatus === 'BLOCKED' ? 'Cần hỗ trợ' : 'Không có'}</p>
               <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-slate-700">{data.checkin.blockerStatus === 'BLOCKED' ? data.checkin.blockerDescription : 'Không có vướng mắc được báo cáo'}</p>
+              {data.checkin.blockerFeedback && (
+                <div className="mt-3 border-t border-slate-200/70 pt-3">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-800">
+                    Phản hồi quản lý{data.checkin.blockerFeedbackBy ? ` · ${data.checkin.blockerFeedbackBy}` : ''}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-700">{data.checkin.blockerFeedback}</p>
+                  {data.checkin.blockerFeedbackAt && (
+                    <time className="mt-1 block text-[10px] text-slate-400">{new Date(data.checkin.blockerFeedbackAt).toLocaleString('vi-VN')}</time>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </section>

@@ -166,6 +166,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.isAccAdmin === true;
   const [history, setHistory] = useState<TaskHistoryEntry[]>([]);
+  const [historyDate, setHistoryDate] = useState('');
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
@@ -196,7 +197,9 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
     if (!task || activeTab !== 'history') return;
     setLoadingHistory(true);
     setHistoryError('');
-    api.get<{ data: TaskHistoryEntry[] }>(`/tasks/${task.id}/history`)
+    api.get<{ data: TaskHistoryEntry[] }>(`/tasks/${task.id}/history`, {
+      params: historyDate ? { date: historyDate } : undefined,
+    })
       .then((response) => setHistory(response.data.data))
       .catch((err: unknown) => {
         const message = (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'Không tải được lịch sử thao tác.';
@@ -204,7 +207,7 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
         toast.error(message);
       })
       .finally(() => setLoadingHistory(false));
-  }, [activeTab, task]);
+  }, [activeTab, historyDate, task]);
 
   useEffect(() => {
     if (!task || activeTab !== 'attachments') return;
@@ -894,6 +897,16 @@ export default function TaskModal({ task, onClose, onSaved }: TaskModalProps) {
           ) : null}
           {activeTab === 'history' && isEdit && (
             <section className="space-y-3">
+              <label className="flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+                <span>Lọc lịch sử theo ngày</span>
+                <input
+                  type="date"
+                  value={historyDate}
+                  onChange={(event) => setHistoryDate(event.target.value)}
+                  aria-label="Lọc lịch sử task theo ngày"
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
               {loadingHistory ? <p className="py-8 text-center text-xs text-slate-400">Đang tải lịch sử...</p> :
                 historyError ? <p className="py-8 text-center text-xs text-rose-600">{historyError}</p> :
                   history.length === 0 ? <p className="py-8 text-center text-xs text-slate-400">Chưa có thao tác nào được ghi nhận.</p> :
@@ -1218,6 +1231,8 @@ function historyActionLabel(action: string): string {
     completedAt: 'ghi nhận thời điểm hoàn thành',
     deleted: 'xóa mềm công việc',
     attachment_added: 'đính kèm tệp',
+    subtask: 'cập nhật subtask',
+    blocker: 'cập nhật vướng mắc',
   };
   return labels[action] ?? action;
 }

@@ -1,6 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import type { Task } from '../types';
-import { findEligiblePartnerUserIdsForUsers } from '../repositories/notificationRepository';
-import { sendPartnerNotification } from './notificationService';
+import { HttpError } from '../middleware/errorHandler';
+import {
+  findEligiblePartnerUserIdsForUsers,
+  findNotificationRecipients,
+  saveNotificationHistory,
+} from '../repositories/notificationRepository';
+import { sendNotificationToCheckin } from './checkinService';
 
 const TASK_NOTIFICATION_TITLE = 'Task có thay đổi';
 const TASK_STATUS_LABELS: Record<Task['status'], string> = {
@@ -50,16 +56,61 @@ async function sendTaskNotification(
   try {
     const partnerUserIds = await findEligiblePartnerUserIdsForUsers(recipients);
     if (partnerUserIds.length === 0) return;
-    await sendPartnerNotification(
-      {
+    const notificationRecipients = await findNotificationRecipients(partnerUserIds);
+    const eligiblePartnerUserIds = new Set(
+      notificationRecipients.map((recipient) => Number(recipient.partner_user_id)),
+    );
+    if (
+      notificationRecipients.length !== partnerUserIds.length ||
+      partnerUserIds.some((id) => !eligiblePartnerUserIds.has(id))
+    ) {
+      console.error('[Task notification] skipped invalid recipient batch', JSON.stringify({
+        taskId: task.id,
+        requested: partnerUserIds.length,
+        eligible: notificationRecipients.length,
+      }));
+      return;
+    }
+
+    const requestId = randomUUID();
+    let deliveryStatus: 'RECORDED' | 'FAILED' = 'RECORDED';
+    let errorCode: string | null = null;
+    try {
+      await sendNotificationToCheckin({
         userIds: partnerUserIds,
         title: TASK_NOTIFICATION_TITLE,
         body,
         data: taskNotificationData(task),
-      },
-      actorId,
-      'SYSTEM',
-    );
+      });
+    } catch (error) {
+      deliveryStatus = 'FAILED';
+      errorCode = error instanceof HttpError
+        ? `CHECKIN_HTTP_${error.status}`
+        : error instanceof Error
+          ? error.name.slice(0, 100)
+          : 'CHECKIN_REQUEST_FAILED';
+      console.error('[Task notification] Checkin request failed', JSON.stringify({
+        taskId: task.id,
+        recipientCount: partnerUserIds.length,
+        requestId,
+        errorCode,
+      }));
+    }
+
+    await saveNotificationHistory(notificationRecipients.map((recipient) => ({
+      requestId,
+      userId: recipient.id,
+      partnerUserId: Number(recipient.partner_user_id),
+      initiatedByUserId: actorId,
+      source: 'SYSTEM',
+      title: TASK_NOTIFICATION_TITLE,
+      body,
+      data: taskNotificationData(task),
+      deliveryStatus,
+      deviceCount: 0,
+      acceptedDeviceCount: 0,
+      errorCode,
+    })));
   } catch (error) {
     console.error('[Task notification] delivery failed', JSON.stringify({
       taskId: task.id,
