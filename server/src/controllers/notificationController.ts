@@ -4,6 +4,7 @@ import { sendNotificationToCheckin } from '../services/checkinService';
 import {
   getAdminMirroredEmployees,
   getAdminNotificationHistory,
+  getAdminNotificationHistoryDetail,
   getAdminNotificationRecipients,
   parseSendNotificationInput,
   recordPartnerNotification,
@@ -46,4 +47,14 @@ export async function notificationHistory(req: Request, res: Response) {
   const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : '';
   const result = await getAdminNotificationHistory(page, limit, search);
   res.json(result);
+}
+
+export async function notificationHistoryDetail(req: Request, res: Response) {
+  const requestId = req.params.requestId;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new HttpError(400, 'Invalid notification request id');
+  }
+  const data = await getAdminNotificationHistoryDetail(requestId);
+  if (!data) throw new HttpError(404, 'Notification history not found');
+  res.json({ data });
 }

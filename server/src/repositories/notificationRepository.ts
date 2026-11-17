@@ -17,7 +17,7 @@ export interface NotificationHistoryInput {
   userId: number;
   partnerUserId: number;
   initiatedByUserId: number | null;
-  source: 'PARTNER' | 'ADMIN' | 'CRON_DAILY' | 'CRON_INACTIVITY' | 'CRON_NO_TASK' | 'SYSTEM';
+  source: 'PARTNER' | 'ADMIN' | 'CRON_DAILY' | 'CRON_INACTIVITY' | 'CRON_NO_TASK' | 'DAILY_CHECKIN_REMINDER' | 'SYSTEM';
   title: string;
   body: string;
   data: Record<string, string>;
@@ -37,6 +37,7 @@ export interface NotificationHistoryRow extends RowDataPacket {
   request_id: string;
   title: string;
   body: string;
+  source: string;
   sent: number;
   failed: number;
   recorded: number;
@@ -130,6 +131,7 @@ export async function getNotificationHistory(query: NotificationHistoryQuery) {
   );
   const [rows] = await pool.query<NotificationHistoryRow[]>(
     `SELECT h.request_id, MIN(h.title) AS title, MIN(h.body) AS body,
+            MAX(h.source) AS source,
             SUM(h.delivery_status = 'SENT') AS sent,
             SUM(h.delivery_status = 'RECORDED') AS recorded,
             SUM(h.delivery_status = 'FAILED') AS failed,
@@ -137,6 +139,7 @@ export async function getNotificationHistory(query: NotificationHistoryQuery) {
               WHEN 'CRON_DAILY' THEN 'Tự động - 09:00'
               WHEN 'CRON_INACTIVITY' THEN 'Tự động - 09:30'
               WHEN 'CRON_NO_TASK' THEN 'Tự động - 10:00'
+              WHEN 'DAILY_CHECKIN_REMINDER' THEN CONCAT('Nhắc Daily Check-in · ', admin.name)
               WHEN 'PARTNER' THEN 'Checkin'
               WHEN 'ADMIN' THEN admin.name
               ELSE 'Hệ thống'
@@ -152,6 +155,55 @@ export async function getNotificationHistory(query: NotificationHistoryQuery) {
   );
 
   return { rows, total: Number(countRows[0]?.total ?? 0) };
+}
+
+export interface NotificationHistoryDetailRow extends RowDataPacket {
+  request_id: string;
+  title: string;
+  body: string;
+  source: string;
+  data: unknown;
+  user_id: number;
+  partner_user_id: number;
+  recipient_name: string;
+  recipient_email: string;
+  department: string | null;
+  delivery_status: 'RECORDED' | 'SENT' | 'FAILED';
+  device_count: number;
+  accepted_device_count: number;
+  error_code: string | null;
+  initiated_by: string | null;
+  created_at: string;
+}
+
+export async function getNotificationHistoryDetail(requestId: string): Promise<NotificationHistoryDetailRow[]> {
+  const [rows] = await pool.query<NotificationHistoryDetailRow[]>(
+    `SELECT h.request_id, h.title, h.body, h.source, h.data,
+            h.user_id, h.partner_user_id, recipient.name AS recipient_name,
+            recipient.email AS recipient_email, recipient.department,
+            h.delivery_status, h.device_count, h.accepted_device_count, h.error_code,
+            actor.name AS initiated_by, h.created_at
+     FROM notification_history h
+     JOIN users recipient ON recipient.id = h.user_id
+     LEFT JOIN users actor ON actor.id = h.initiated_by_user_id
+     WHERE h.request_id = ?
+     ORDER BY recipient.name, h.id`,
+    [requestId],
+  );
+  return rows;
+}
+
+export async function updateNotificationHistoryDelivery(
+  requestId: string,
+  deliveryStatus: 'RECORDED' | 'SENT' | 'FAILED',
+  errorCode: string | null,
+): Promise<void> {
+  await pool.query(
+    `UPDATE notification_history
+     SET delivery_status = ?, error_code = ?
+     WHERE request_id = ? AND source = 'DAILY_CHECKIN_REMINDER'`,
+    [deliveryStatus, errorCode, requestId],
+  );
 }
 
 export async function getBoundFcmTokens(userIds: number[]): Promise<BoundFcmToken[]> {

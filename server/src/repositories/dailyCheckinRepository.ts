@@ -221,6 +221,20 @@ export async function loadTodayCheckin(userId: number): Promise<Record<string, u
     'SELECT task_id AS taskId FROM daily_checkin_tasks WHERE user_id = ? AND checkin_date = CURDATE() ORDER BY position, task_id',
     [userId],
   );
+  const [blockerCommentRows] = await pool.query<Array<RowDataPacket & {
+    id: number;
+    body: string;
+    userName: string | null;
+    createdAt: string;
+  }>>(
+    `SELECT comment.id, comment.body, author.name AS userName, comment.created_at AS createdAt
+     FROM daily_checkin_blockers blocker
+     JOIN daily_checkin_blocker_comments comment ON comment.blocker_id = blocker.id
+     LEFT JOIN users author ON author.id = comment.user_id
+     WHERE blocker.checkin_id = ?
+     ORDER BY comment.created_at, comment.id`,
+    [row.id],
+  );
   let reviewedTaskIds: number[] = [];
   try {
     const parsed: unknown = JSON.parse(row.reviewedTaskIds);
@@ -240,6 +254,12 @@ export async function loadTodayCheckin(userId: number): Promise<Record<string, u
     blockerFeedback: row.blockerFeedback,
     blockerFeedbackBy: row.blockerFeedbackBy,
     blockerFeedbackAt: row.blockerFeedbackAt,
+    blockerComments: blockerCommentRows.map((comment) => ({
+      id: Number(comment.id),
+      body: comment.body,
+      userName: comment.userName,
+      createdAt: comment.createdAt,
+    })),
     isComplete: Boolean(row.isComplete),
     completedAt: row.completedAt,
     savedAt: row.savedAt,
@@ -340,6 +360,53 @@ export async function saveTodayCheckin(userId: number, input: DailyCheckinInput)
         Number(blockerChanged),
       ],
     );
+    if (input.complete && input.blockerStatus === 'BLOCKED') {
+      const [checkinRows] = await connection.query<Array<RowDataPacket & { id: number }>>(
+        'SELECT id FROM daily_checkins WHERE user_id = ? AND checkin_date = CURDATE() FOR UPDATE',
+        [userId],
+      );
+      const checkinId = Number(checkinRows[0].id);
+      const [insertResult] = await connection.query(
+        `INSERT IGNORE INTO daily_checkin_blockers (checkin_id, priority)
+         VALUES (?, ?)`,
+        [checkinId, input.blockerImpact],
+      );
+      const [blockerRows] = await connection.query<Array<RowDataPacket & { id: number }>>(
+        'SELECT id FROM daily_checkin_blockers WHERE checkin_id = ? FOR UPDATE',
+        [checkinId],
+      );
+      const blockerId = Number(blockerRows[0].id);
+      if ('affectedRows' in insertResult && Number(insertResult.affectedRows) > 0) {
+        await connection.query(
+          `INSERT INTO daily_checkin_blocker_history
+             (blocker_id, user_id, action_type, old_value, new_value)
+           VALUES (?, ?, 'reported', NULL, ?)`,
+          [blockerId, userId, input.blockerDescription],
+        );
+      } else if (blockerChanged) {
+        await connection.query(
+          `UPDATE daily_checkin_blockers
+           SET status = 'OPEN', resolved_at = NULL, version = version + 1
+           WHERE id = ? AND status = 'RESOLVED'`,
+          [blockerId],
+        );
+        await connection.query(
+          `INSERT INTO daily_checkin_blocker_history
+             (blocker_id, user_id, action_type, old_value, new_value)
+           VALUES (?, ?, 'reported', ?, ?)`,
+          [
+            blockerId,
+            userId,
+            blockerHistoryValue(
+              previousBlocker?.blockerStatus ?? null,
+              previousBlocker?.blockerDescription ?? null,
+              previousBlocker?.blockerImpact ?? null,
+            ),
+            blockerHistoryValue(input.blockerStatus, input.blockerDescription, input.blockerImpact),
+          ],
+        );
+      }
+    }
     if (blockerChanged) {
       const affectedTaskIds = [...new Set([
         previousBlockerTaskId,

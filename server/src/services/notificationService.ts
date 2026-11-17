@@ -5,6 +5,7 @@ import { env } from '../config/env';
 import { HttpError } from '../middleware/errorHandler';
 import {
   deleteInvalidFcmTokens,
+  getNotificationHistoryDetail,
   getNotificationHistory,
   findNotificationRecipients,
   getBoundFcmTokens,
@@ -388,6 +389,7 @@ export async function getAdminNotificationHistory(page: number, limit: number, s
       requestId: row.request_id,
       title: row.title,
       body: row.body,
+      source: row.source,
       sent: Number(row.sent),
       recorded: Number(row.recorded),
       failed: Number(row.failed),
@@ -397,5 +399,31 @@ export async function getAdminNotificationHistory(page: number, limit: number, s
     total: result.total,
     page,
     limit,
+  };
+}
+
+export async function getAdminNotificationHistoryDetail(requestId: string) {
+  const rows = await getNotificationHistoryDetail(requestId);
+  if (rows.length === 0) return null;
+  const first = rows[0];
+  return {
+    requestId: first.request_id,
+    title: first.title,
+    body: first.body,
+    source: first.source,
+    data: first.data,
+    initiatedBy: first.initiated_by ?? 'Đối tác / hệ thống',
+    createdAt: first.created_at,
+    recipients: rows.map((row) => ({
+      userId: Number(row.user_id),
+      partnerUserId: Number(row.partner_user_id),
+      name: row.recipient_name,
+      email: row.recipient_email,
+      department: row.department,
+      deliveryStatus: row.delivery_status,
+      deviceCount: Number(row.device_count),
+      acceptedDeviceCount: Number(row.accepted_device_count),
+      errorCode: row.error_code,
+    })),
   };
 }

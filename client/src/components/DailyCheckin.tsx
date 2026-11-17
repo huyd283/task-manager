@@ -28,6 +28,13 @@ import {
 type BlockerStatus = 'NONE' | 'BLOCKED';
 type BlockerImpact = 'LOW' | 'MEDIUM' | 'HIGH';
 
+interface BlockerComment {
+  id: number;
+  body: string;
+  userName: string | null;
+  createdAt: string;
+}
+
 interface CheckinRecord {
   reviewedTaskIds: number[];
   reviewConfirmed: boolean;
@@ -40,6 +47,7 @@ interface CheckinRecord {
   blockerFeedback: string | null;
   blockerFeedbackBy: string | null;
   blockerFeedbackAt: string | null;
+  blockerComments: BlockerComment[];
   isComplete: boolean;
   completedAt: string | null;
   savedAt: string | null;
@@ -343,6 +351,17 @@ export default function DailyCheckin({ onCreateTask }: DailyCheckinProps) {
                   {data.checkin.blockerFeedbackAt && (
                     <time className="mt-1 block text-[10px] text-slate-400">{new Date(data.checkin.blockerFeedbackAt).toLocaleString('vi-VN')}</time>
                   )}
+                </div>
+              )}
+              {data.checkin.blockerComments.length > 0 && (
+                <div className="mt-3 space-y-2 border-t border-slate-200/70 pt-3">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-800">Trao đổi hỗ trợ</p>
+                  {data.checkin.blockerComments.map((comment) => (
+                    <div key={comment.id} className="rounded-lg border border-blue-100 bg-white/80 p-2.5">
+                      <p className="whitespace-pre-wrap text-sm leading-5 text-slate-700">{comment.body}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">{comment.userName ?? 'Quản lý'} · {new Date(comment.createdAt).toLocaleString('vi-VN')}</p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

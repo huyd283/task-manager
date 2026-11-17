@@ -209,6 +209,31 @@ Tài khoản chỉ được tạo sau OTP hợp lệ. Mã nhân viên mới có 
 | GET/POST | `/api/tasks/:id/subtasks`      | Danh sách/tạo subtask |
 | PATCH/DELETE | `/api/tasks/:id/subtasks/:subtaskId` | Cập nhật `{ title, status, assigneeId, estimatedHours }` / xóa |
 
+### Daily Check-in cho Admin / Project Lead
+
+Nâng cấp database hiện có bằng migration idempotent:
+
+```bash
+cd server && npm run db:migrate:daily-checkin
+```
+
+Server cũng tự chạy migration khi khởi động. Migration tạo dữ liệu triage blocker, bình luận, lịch sử và throttle nhắc theo nhân sự/ngày; các blocker trong check-in đã hoàn tất được backfill sang trạng thái `OPEN`. Admin xem toàn bộ phạm vi; Project Lead chỉ xem cùng phòng ban hoặc dự án có membership quản lý hợp lệ.
+
+| Method | Endpoint | Mô tả |
+| ------ | -------- | ----- |
+| GET | `/api/v1/admin/daily-checkin/stats?date=YYYY-MM-DD&projectId=ID` | KPI và danh sách nhân sự trong phạm vi |
+| GET | `/api/v1/admin/daily-checkin/:userId?date=YYYY-MM-DD&projectId=ID` | Chi tiết check-in, task đã rà soát và kế hoạch |
+| GET | `/api/v1/admin/daily-checkin/blockers?status=ACTIVE&projectId=ID` | Danh sách blocker; trạng thái lọc `ACTIVE`, `ALL`, `OPEN`, `IN_PROGRESS`, `RESOLVED` |
+| GET | `/api/v1/admin/daily-checkin/blockers/:blockerId` | Context, bình luận và lịch sử triage |
+| PATCH | `/api/v1/admin/daily-checkin/blockers/:blockerId` | Cập nhật `{ version, status, priority, category, assigneeId }`; status: `OPEN`, `IN_PROGRESS`, `RESOLVED`; priority: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`; category: `TECHNICAL`, `DEPENDENCY`, `RESOURCE`, `ACCESS`, `OTHER` |
+| POST | `/api/v1/admin/daily-checkin/blockers/:blockerId/comments` | Thêm trao đổi bằng `{ body }`; nội dung được chia sẻ với nhân sự báo cáo |
+| POST | `/api/v1/admin/daily-checkin/reminders` | Nhắc nhân sự chưa hoàn tất bằng `{ userId, date, projectId? }`; mỗi người tối đa một yêu cầu/ngày |
+| GET | `/api/admin/notifications/history/:requestId` | Chi tiết từng người nhận, trạng thái tiếp nhận/gửi và mã lỗi của một lượt thông báo |
+
+Mỗi lần nhắc Daily Check-in được ghi theo người nhận vào `notification_history` và hiển thị trong menu **Thông báo**; nhấp vào một mục lịch sử để xem chi tiết. Trạng thái `RECORDED` nghĩa là Checkin đã tiếp nhận yêu cầu, không khẳng định thiết bị đã hiển thị push.
+
+Các thay đổi triage trên blocker gắn task cũng được ghi vào `/api/tasks/:id/history?date=YYYY-MM-DD`.
+
 ### Quản lý dự án
 
 Mọi endpoint yêu cầu token. Thành viên chỉ thấy dự án/task thuộc dự án của mình; admin và Project Lead có thể quản lý toàn bộ dự án.

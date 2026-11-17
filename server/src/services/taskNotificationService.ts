@@ -36,8 +36,8 @@ function formatDueDate(value: string | null): string {
 
 function taskNotificationData(task: Task) {
   return {
-    type: 'TASK_NOTIFICATION',
-    screen: 'TASK_DETAIL',
+    type: 'GENERAL_NOTIFICATION',
+    screen: 'HOME',
     taskId: String(task.id),
     taskCode: task.taskCode,
   };

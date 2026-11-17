@@ -11,6 +11,7 @@ import {
   Search,
   Send,
   Users,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../api/client';
@@ -27,11 +28,33 @@ interface HistoryItem {
   requestId: string;
   title: string;
   body: string;
+  source: string;
   sent: number;
   recorded: number;
   failed: number;
   initiatedBy: string;
   createdAt: string;
+}
+
+interface NotificationHistoryDetail {
+  requestId: string;
+  title: string;
+  body: string;
+  source: string;
+  data: unknown;
+  initiatedBy: string;
+  createdAt: string;
+  recipients: Array<{
+    userId: number;
+    partnerUserId: number;
+    name: string;
+    email: string;
+    department: string | null;
+    deliveryStatus: 'RECORDED' | 'SENT' | 'FAILED';
+    deviceCount: number;
+    acceptedDeviceCount: number;
+    errorCode: string | null;
+  }>;
 }
 
 interface SendResult {
@@ -77,6 +100,30 @@ function formatDate(value: string): string {
     : new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+function sourceLabel(source: string): string {
+  if (source === 'DAILY_CHECKIN_REMINDER') return 'Nhắc Daily Check-in';
+  if (source.startsWith('CRON_')) return 'Thông báo tự động';
+  if (source === 'ADMIN') return 'Thông báo quản trị';
+  if (source === 'PARTNER') return 'Checkin';
+  return 'Hệ thống';
+}
+
+function deliveryStatusLabel(status: NotificationHistoryDetail['recipients'][number]['deliveryStatus']): string {
+  return {
+    RECORDED: 'Đã ghi nhận',
+    SENT: 'Đã gửi',
+    FAILED: 'Thất bại',
+  }[status];
+}
+
+function deliveryStatusClass(status: NotificationHistoryDetail['recipients'][number]['deliveryStatus']): string {
+  return {
+    RECORDED: 'bg-blue-50 text-blue-700',
+    SENT: 'bg-emerald-50 text-emerald-700',
+    FAILED: 'bg-rose-50 text-rose-700',
+  }[status];
+}
+
 export default function NotificationManagement() {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(true);
@@ -98,6 +145,9 @@ export default function NotificationManagement() {
   const [historySearch, setHistorySearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [selectedHistory, setSelectedHistory] = useState<NotificationHistoryDetail | null>(null);
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
+  const [historyDetailError, setHistoryDetailError] = useState('');
 
   const departments = useMemo(
     () => [...new Set(recipients.map((recipient) => recipient.department).filter(Boolean))].sort(),
@@ -246,6 +296,22 @@ export default function NotificationManagement() {
   const changeHistoryPage = (page: number) => {
     if (page < 1 || page > totalPages || page === historyPage) return;
     void loadHistory(page, appliedSearch);
+  };
+
+  const openHistoryDetail = async (requestId: string) => {
+    setSelectedHistory(null);
+    setHistoryDetailError('');
+    setHistoryDetailLoading(true);
+    try {
+      const response = await api.get<{ data: NotificationHistoryDetail }>(
+        `/admin/notifications/history/${requestId}`,
+      );
+      setSelectedHistory(response.data.data);
+    } catch (error) {
+      setHistoryDetailError(getErrorMessage(error, 'Không thể tải chi tiết thông báo.'));
+    } finally {
+      setHistoryDetailLoading(false);
+    }
   };
 
   return (
@@ -507,10 +573,19 @@ export default function NotificationManagement() {
               </div>
             ) : (
               history.map((item) => (
-                <article key={item.requestId} className="p-5 transition hover:bg-slate-50/70">
+                <button
+                  key={item.requestId}
+                  type="button"
+                  onClick={() => void openHistoryDetail(item.requestId)}
+                  className="block w-full p-5 text-left transition hover:bg-slate-50/70 focus:bg-blue-50/50 focus:outline-none"
+                  aria-label={`Xem chi tiết thông báo: ${item.title}`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-sm font-bold text-slate-900">{item.title}</h3>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate text-sm font-bold text-slate-900">{item.title}</h3>
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{sourceLabel(item.source)}</span>
+                      </div>
                       <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm leading-5 text-slate-500">{item.body}</p>
                     </div>
                     <time className="shrink-0 text-xs text-slate-400">{formatDate(item.createdAt)}</time>
@@ -523,7 +598,8 @@ export default function NotificationManagement() {
                     <span className="font-semibold text-rose-600">Thất bại {item.failed}</span>
                     <span className="text-slate-500">Bởi {item.initiatedBy || 'Đối tác / hệ thống'}</span>
                   </div>
-                </article>
+                  <p className="mt-2 text-[11px] font-semibold text-blue-700">Xem chi tiết người nhận và trạng thái →</p>
+                </button>
               ))
             )}
           </div>
@@ -555,6 +631,74 @@ export default function NotificationManagement() {
           </div>
         </section>
       </div>
+
+      {(historyDetailLoading || historyDetailError || selectedHistory) && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedHistory(null);
+              setHistoryDetailError('');
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notification-history-detail-title"
+            className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            {historyDetailLoading ? (
+              <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-slate-500">
+                <Loader2 size={18} className="animate-spin" /> Đang tải chi tiết thông báo…
+              </div>
+            ) : historyDetailError ? (
+              <div className="p-6">
+                <p role="alert" className="text-sm font-semibold text-rose-700">{historyDetailError}</p>
+                <button type="button" onClick={() => setHistoryDetailError('')} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Đóng</button>
+              </div>
+            ) : selectedHistory ? (
+              <>
+                <header className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+                  <div className="min-w-0">
+                    <span className="inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700">{sourceLabel(selectedHistory.source)}</span>
+                    <h2 id="notification-history-detail-title" className="mt-2 text-lg font-bold text-slate-900">{selectedHistory.title}</h2>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-600">{selectedHistory.body}</p>
+                  </div>
+                  <button type="button" onClick={() => setSelectedHistory(null)} aria-label="Đóng chi tiết thông báo" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+                </header>
+                <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-5 text-xs sm:grid-cols-2">
+                  <p><span className="font-semibold text-slate-500">Thời gian:</span> <span className="text-slate-800">{formatDate(selectedHistory.createdAt)}</span></p>
+                  <p><span className="font-semibold text-slate-500">Người gửi:</span> <span className="text-slate-800">{selectedHistory.initiatedBy}</span></p>
+                  <p className="break-all sm:col-span-2"><span className="font-semibold text-slate-500">Mã yêu cầu:</span> <span className="font-mono text-slate-800">{selectedHistory.requestId}</span></p>
+                </div>
+                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+                  <h3 className="text-sm font-bold text-slate-900">Người nhận</h3>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{selectedHistory.recipients.length}</span>
+                </div>
+                <ul className="searchable-select-scrollbar min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
+                  {selectedHistory.recipients.map((recipient) => (
+                    <li key={`${recipient.userId}-${recipient.partnerUserId}`} className="flex flex-wrap items-center gap-3 px-5 py-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-700">{recipient.name.trim().slice(0, 1).toLocaleUpperCase()}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-slate-800">{recipient.name}</span>
+                        <span className="block truncate text-xs text-slate-500">{recipient.email}{recipient.department ? ` · ${recipient.department}` : ''}</span>
+                      </span>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${deliveryStatusClass(recipient.deliveryStatus)}`}>
+                        {deliveryStatusLabel(recipient.deliveryStatus)}
+                      </span>
+                      {recipient.deviceCount > 0 && (
+                        <span className="w-full text-right text-[10px] text-slate-400 sm:w-auto">{recipient.acceptedDeviceCount}/{recipient.deviceCount} thiết bị</span>
+                      )}
+                      {recipient.errorCode && <span className="w-full text-right text-[10px] text-rose-600">{recipient.errorCode}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
