@@ -11,6 +11,8 @@ import userRoutes from "./routes/userRoutes";
 import internalNotificationRoutes from "./routes/internalNotificationRoutes";
 import adminNotificationRoutes from "./routes/adminNotificationRoutes";
 import { auditInternalPartnerRequest, authenticateInternalPartner } from "./middleware/internalPartner";
+import externalDailyCheckinExportRoutes from "./routes/externalDailyCheckinExportRoutes";
+import { auditExternalDailyCheckinExport } from "./middleware/externalDailyCheckinExport";
 
 export function createApp() {
   const app = express();
@@ -31,6 +33,12 @@ export function createApp() {
   });
 
   app.use(["/api/auth", "/auth"], authRoutes);
+  app.use(
+    "/api/v1/external/daily-checkin",
+    auditExternalDailyCheckinExport,
+    authenticateInternalPartner,
+    externalDailyCheckinExportRoutes,
+  );
   app.use(
     "/api/v1/internal/notifications",
     authenticateInternalPartner,

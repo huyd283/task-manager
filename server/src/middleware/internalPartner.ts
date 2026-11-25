@@ -52,6 +52,11 @@ export function authenticateInternalPartner(req: Request, res: Response, next: N
     !safeEqual(partnerCode, expectedCode) ||
     !safeEqual(partnerToken, expectedToken)
   ) {
+    console.warn('[Internal partner] authentication failed', JSON.stringify({
+      requestId: res.locals.externalDailyCheckinRequestId,
+      ip: req.ip,
+      path: req.originalUrl.split('?')[0],
+    }));
     return res.status(401).json({ message: 'Invalid partner credentials', code: 'INVALID_PARTNER_CREDENTIALS' });
   }
   return next();

@@ -234,6 +234,20 @@ Mỗi lần nhắc Daily Check-in được ghi theo người nhận vào `notifi
 
 Các thay đổi triage trên blocker gắn task cũng được ghi vào `/api/tasks/:id/history?date=YYYY-MM-DD`.
 
+### External Daily Check-in export
+
+Endpoint external không dùng JWT/session hoặc API key riêng; xác thực bằng partner credential đã được Checkin cấp cho TomoHub (`CHECKIN_PARTNER_CODE` và `CHECKIN_PARTNER_TOKEN` trong `server/.env`):
+
+| Method | Endpoint | Mô tả |
+| ------ | -------- | ----- |
+| GET | `/api/v1/external/daily-checkin/dashboard` | Lấy thống kê Daily Check-in dạng JSON |
+
+Gửi `X-Partner-Code: <CHECKIN_PARTNER_CODE>` và `X-Partner-Token: <CHECKIN_PARTNER_TOKEN>`. Hỗ trợ `date=YYYY-MM-DD` hoặc cặp `fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD` (tối đa 31 ngày), cùng các filter `userId`, `departmentId` (giá trị `users.department`), `teamId` (ID project trong `project_members`) và `status=Submitted|Pending|hasBlocker`. Response gồm `summary` và `records`. Mỗi request được gán UUID `requestId` để trace/audit; credential không được ghi vào log. Kết quả giới hạn tối đa 20.000 lượt check-in.
+
+Ví dụ: `GET /api/v1/external/daily-checkin/dashboard?fromDate=2026-11-24&toDate=2026-11-25`
+
+Hướng dẫn tích hợp chi tiết và cấu hình Postman: [DAILY_CHECKIN_DASHBOARD_API.md](./DAILY_CHECKIN_DASHBOARD_API.md).
+
 ### Quản lý dự án
 
 Mọi endpoint yêu cầu token. Thành viên chỉ thấy dự án/task thuộc dự án của mình; admin và Project Lead có thể quản lý toàn bộ dự án.
